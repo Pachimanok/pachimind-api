@@ -1,0 +1,10 @@
+[Unit]
+Description=PachiMind — digest semanal, domingos 08:00
+Requires=weekly-digest.service
+
+[Timer]
+OnCalendar=Sun *-*-* 08:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

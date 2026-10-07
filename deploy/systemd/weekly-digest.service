@@ -1,0 +1,14 @@
+[Unit]
+Description=PachiMind — digest semanal de notas sin revisar
+After=network.target pachimind-api.service
+
+[Service]
+Type=oneshot
+User=pachimind
+Group=pachimind
+WorkingDirectory=/srv/pachimind/api
+EnvironmentFile=/srv/pachimind/.env
+ExecStart=/srv/pachimind/api/.venv/bin/python /srv/pachimind/api/scripts/weekly_digest.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pachimind-weekly-digest

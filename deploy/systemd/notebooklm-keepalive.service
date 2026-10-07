@@ -1,0 +1,13 @@
+[Unit]
+Description=PachiMind NotebookLM — refresh de sesión
+After=network.target
+
+[Service]
+Type=oneshot
+User=pachimind
+Group=pachimind
+EnvironmentFile=/srv/pachimind/.env
+ExecStart=/srv/pachimind/api/.venv/bin/notebooklm auth refresh --quiet
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pachimind-notebooklm-keepalive

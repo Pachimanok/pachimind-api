@@ -1,0 +1,24 @@
+[Unit]
+Description=PachiMind API (FastAPI/uvicorn)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pachimind
+Group=pachimind
+WorkingDirectory=/srv/pachimind/api
+ExecStart=/srv/pachimind/api/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 1 \
+    --log-level info
+EnvironmentFile=/srv/pachimind/.env
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pachimind-api
+
+[Install]
+WantedBy=multi-user.target

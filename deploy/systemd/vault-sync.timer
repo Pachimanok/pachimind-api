@@ -1,0 +1,11 @@
+[Unit]
+Description=PachiMind Vault — sync cada 5 minutos
+Requires=vault-sync.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

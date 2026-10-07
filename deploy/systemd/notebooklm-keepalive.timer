@@ -1,0 +1,11 @@
+[Unit]
+Description=PachiMind NotebookLM — keepalive cada 15 minutos
+Requires=notebooklm-keepalive.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

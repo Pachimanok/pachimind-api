@@ -1,0 +1,17 @@
+[Unit]
+Description=PachiMind Vault — auto-commit git
+After=network.target
+
+[Service]
+Type=oneshot
+User=pachimind
+Group=pachimind
+WorkingDirectory=/srv/pachimind/vault
+ExecStart=/usr/bin/bash -c '\
+    git add -A && \
+    (git diff --cached --quiet || git commit -m "sync: $(date --iso-8601=seconds)") && \
+    (git remote get-url origin > /dev/null 2>&1 && git push --quiet || true) \
+'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pachimind-vault-sync

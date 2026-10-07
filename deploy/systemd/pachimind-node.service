@@ -1,0 +1,23 @@
+[Unit]
+Description=PachiMind Node.js (Express + AI Gemini)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pachimind
+Group=pachimind
+WorkingDirectory=/srv/pachimind/node
+ExecStart=/usr/bin/node dist/server.cjs
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOST=127.0.0.1
+EnvironmentFile=/srv/pachimind/.env
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pachimind-node
+
+[Install]
+WantedBy=multi-user.target

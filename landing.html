@@ -1,0 +1,1059 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PachiMind API — Vault de Obsidian como backend inteligente</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #07070f;
+      --bg-2:         #0d0d1a;
+      --bg-3:         #111120;
+      --border:       #1c1c30;
+      --border-b:     #282840;
+      --accent:       #1de9b0;
+      --accent-dim:   rgba(29,233,176,0.18);
+      --purple:       #9b72ff;
+      --purple-dim:   rgba(155,114,255,0.15);
+      --amber:        #f59e0b;
+      --amber-dim:    rgba(245,158,11,0.12);
+      --red:          #f87171;
+      --text:         #e8e8f4;
+      --text-2:       #9898b8;
+      --text-3:       #52527a;
+      --code-bg:      #09090f;
+      --r:            10px;
+      --r-lg:         16px;
+    }
+
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border-b); border-radius: 3px; }
+
+    h1,h2,h3,h4 { font-family: 'Syne', sans-serif; line-height: 1.15; }
+    code { font-family: 'JetBrains Mono', monospace; font-size: 0.88em; color: var(--accent); }
+
+    .container { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+    section { padding: 88px 0; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      height: 58px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 32px;
+      backdrop-filter: blur(24px) saturate(180%);
+      background: rgba(7,7,15,0.82);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      font-family: 'Syne', sans-serif; font-weight: 800; font-size: 16px;
+      text-decoration: none; color: var(--text);
+      display: flex; align-items: center; gap: 9px;
+    }
+    .nav-gem {
+      width: 20px; height: 20px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--purple) 100%);
+      clip-path: polygon(50% 0%, 100% 35%, 82% 100%, 18% 100%, 0% 35%);
+    }
+    .nav-links { display: flex; gap: 26px; list-style: none; }
+    .nav-links a { font-size: 13.5px; color: var(--text-2); text-decoration: none; transition: color .2s; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 600;
+      padding: 7px 18px; background: var(--accent); color: #03080e;
+      border-radius: 6px; text-decoration: none; transition: opacity .2s, transform .2s;
+    }
+    .nav-cta:hover { opacity: .85; transform: translateY(-1px); }
+
+    /* ── HERO ── */
+    #hero {
+      min-height: 100vh; padding-top: 58px;
+      display: flex; align-items: center;
+      position: relative; overflow: hidden;
+    }
+    .hero-glow {
+      position: absolute; inset: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 50% at 15% 55%, rgba(29,233,176,.06) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 40% at 85% 20%, rgba(155,114,255,.06) 0%, transparent 55%);
+    }
+    .hero-dots {
+      position: absolute; inset: 0; pointer-events: none;
+      background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+      background-size: 30px 30px;
+      mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 0%, transparent 100%);
+      opacity: .6;
+    }
+    .hero-inner {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 56px; align-items: center;
+      width: 100%; max-width: 1080px; margin: 0 auto; padding: 0 24px;
+      position: relative; z-index: 1;
+    }
+    .hero-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent);
+      background: var(--accent-dim); border: 1px solid rgba(29,233,176,.3);
+      padding: 4px 12px; border-radius: 20px; margin-bottom: 22px;
+    }
+    .hero-pill::before {
+      content: ''; width: 6px; height: 6px;
+      background: var(--accent); border-radius: 50%;
+      animation: blink 2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.25} }
+    .hero-h1 {
+      font-size: clamp(34px, 4.8vw, 56px);
+      font-weight: 800; letter-spacing: -.03em;
+      margin-bottom: 18px;
+    }
+    .hero-h1 .hl { color: var(--accent); }
+    .hero-sub {
+      font-size: 16.5px; color: var(--text-2); line-height: 1.72;
+      max-width: 460px; margin-bottom: 34px;
+    }
+    .hero-btns { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 44px; }
+    .btn-p {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 11px 22px; background: var(--accent); color: #03080e;
+      font-family: 'Syne', sans-serif; font-weight: 700; font-size: 14px;
+      border-radius: var(--r); text-decoration: none; transition: all .2s;
+    }
+    .btn-p:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(29,233,176,.28); }
+    .btn-g {
+      display: inline-flex; align-items: center; gap: 7px;
+      padding: 11px 22px; border: 1px solid var(--border-b); color: var(--text-2);
+      font-size: 14px; border-radius: var(--r); text-decoration: none; transition: all .2s;
+    }
+    .btn-g:hover { border-color: var(--text-3); color: var(--text); }
+    .hero-metrics { display: flex; gap: 28px; }
+    .hm-num { font-family: 'Syne', sans-serif; font-size: 26px; font-weight: 800; display: block; }
+    .hm-lab { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); }
+
+    /* Hero visual */
+    .hero-visual { position: relative; height: 380px; }
+    .hv-card {
+      position: absolute; background: var(--bg-2);
+      border: 1px solid var(--border); border-radius: var(--r-lg);
+      padding: 18px; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.85;
+    }
+    .hv-top { top: 0; left: 0; right: 36px; z-index: 2; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+    .hv-bot { bottom: 0; right: 0; left: 36px; z-index: 1; opacity: .75; }
+    .hv-bar {
+      display: flex; align-items: center; gap: 6px;
+      padding-bottom: 12px; margin-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; } .dot-y { background: #febc2e; } .dot-g { background: #28c840; }
+    .hv-fname { font-size: 11px; color: var(--text-3); margin-left: auto; }
+    .yk { color: var(--purple); } .yv { color: var(--accent); } .ys { color: #f9a8d4; }
+    .yb { color: var(--amber); } .yc { color: var(--text-3); }
+    .jk { color: var(--purple); } .js { color: var(--accent); } .jn { color: var(--amber); }
+    .jb { color: var(--text-3); }
+    .badge-get { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: var(--accent-dim); color: var(--accent); }
+    .badge-post { font-size: 10px; padding: 2px 7px; border-radius: 4px; background: var(--purple-dim); color: var(--purple); }
+    .status-ok { font-size: 11px; color: var(--accent); margin-left: auto; }
+    .hv-arrow {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 10; width: 34px; height: 34px;
+      background: var(--bg-3); border: 1px solid var(--border-b);
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-size: 13px; color: var(--text-3);
+    }
+
+    /* ── SECTION HEADER ── */
+    .s-ey {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: .12em;
+      text-transform: uppercase; color: var(--accent);
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    }
+    .s-ey::after { content:''; width: 32px; height: 1px; background: rgba(29,233,176,.35); }
+    .s-h2 { font-size: clamp(26px, 3.5vw, 38px); font-weight: 700; letter-spacing: -.025em; margin-bottom: 14px; }
+    .s-sub { font-size: 16px; color: var(--text-2); line-height: 1.72; max-width: 540px; }
+
+    /* ── HOW IT WORKS ── */
+    #how { background: var(--bg-2); }
+    .flow {
+      display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr;
+      gap: 0; align-items: center; margin-top: 52px;
+    }
+    .flow-card {
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--r-lg); padding: 26px 22px; position: relative; overflow: hidden;
+    }
+    .flow-card::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    }
+    .flow-card:nth-child(1)::after { background: linear-gradient(90deg, var(--purple), transparent); }
+    .flow-card:nth-child(3)::after { background: linear-gradient(90deg, var(--accent), transparent); }
+    .flow-card:nth-child(5)::after { background: linear-gradient(90deg, var(--amber), transparent); }
+    .flow-n { font-family: 'Syne', sans-serif; font-size: 10px; letter-spacing: .1em; color: var(--text-3); text-transform: uppercase; margin-bottom: 10px; }
+    .flow-icon { font-size: 26px; margin-bottom: 12px; }
+    .flow-title { font-size: 15px; font-weight: 700; margin-bottom: 7px; }
+    .flow-desc { font-size: 12.5px; color: var(--text-2); line-height: 1.65; }
+    .flow-snippet {
+      margin-top: 14px; background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 10px 12px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.8; color: var(--text-2);
+    }
+    .flow-arr { text-align: center; color: var(--border-b); font-size: 20px; }
+
+    /* ── TABS ── */
+    #for-devs {}
+    .tabs-bar {
+      display: inline-flex; gap: 3px;
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 4px; margin: 36px 0 32px;
+    }
+    .tb {
+      padding: 8px 20px; font-family: 'Syne', sans-serif; font-size: 13.5px; font-weight: 600;
+      color: var(--text-2); background: transparent; border: none; border-radius: 7px;
+      cursor: pointer; transition: all .2s;
+    }
+    .tb.on { background: var(--bg-3); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+    .tp { display: none; }
+    .tp.on { display: block; }
+    .tc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; }
+    .fi { display: flex; gap: 14px; margin-bottom: 20px; }
+    .fi-icon {
+      width: 36px; height: 36px; flex-shrink: 0; border-radius: 8px;
+      background: var(--bg-3); border: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: center; font-size: 15px;
+    }
+    .fi-text h4 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+    .fi-text p { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+
+    /* ── CODE BLOCK ── */
+    .cb {
+      background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: var(--r-lg); overflow: hidden;
+    }
+    .cb-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 14px; background: var(--bg-3); border-bottom: 1px solid var(--border);
+    }
+    .cb-lang { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); }
+    .cb-copy {
+      font-size: 11px; color: var(--text-3); background: none;
+      border: 1px solid var(--border); padding: 3px 10px; border-radius: 4px;
+      cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all .2s;
+    }
+    .cb-copy:hover { color: var(--text); border-color: var(--border-b); }
+    .cb-body {
+      padding: 20px; font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px; line-height: 1.85; overflow-x: auto; white-space: pre;
+    }
+    .cm { color: var(--text-3); }
+    .kw { color: var(--purple); }
+    .st { color: var(--accent); }
+    .fn { color: #60a5fa; }
+    .cn { color: var(--amber); }
+
+    /* ── SCOPES ── */
+    #scopes { background: var(--bg-2); }
+    .scope-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 18px; margin-top: 44px; }
+    .sc {
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--r-lg); padding: 26px; position: relative; overflow: hidden;
+    }
+    .sc.p { border-top: 2px solid var(--accent); }
+    .sc.a { border-top: 2px solid var(--purple); }
+    .sc.u { border-top: 2px solid var(--amber); }
+    .sc-tag {
+      display: inline-block; font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; padding: 3px 11px; border-radius: 5px; margin-bottom: 14px;
+    }
+    .sc-tag.p { background: var(--accent-dim); color: var(--accent); }
+    .sc-tag.a { background: var(--purple-dim); color: var(--purple); }
+    .sc-tag.u { background: var(--amber-dim); color: var(--amber); }
+    .sc-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .sc-desc { font-size: 13px; color: var(--text-2); line-height: 1.6; margin-bottom: 18px; }
+    .sc-rules { list-style: none; display: flex; flex-direction: column; gap: 7px; }
+    .sc-rule { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; color: var(--text-2); }
+    .ri { flex-shrink: 0; font-size: 11px; margin-top: 2px; }
+    .ri.y { color: var(--accent); }
+    .ri.n { color: var(--red); }
+    .ri.m { color: var(--amber); }
+
+    /* ── ENDPOINTS ── */
+    #endpoints {}
+    .ep-filters { display: flex; gap: 7px; flex-wrap: wrap; margin: 28px 0 20px; }
+    .ef {
+      font-size: 12px; padding: 5px 14px; border: 1px solid var(--border);
+      border-radius: 20px; background: transparent; color: var(--text-2);
+      cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all .2s;
+    }
+    .ef:hover, .ef.on { background: var(--bg-2); color: var(--text); border-color: var(--border-b); }
+    .ep-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .epc {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--r); overflow: hidden; cursor: pointer; transition: border-color .2s;
+    }
+    .epc:hover { border-color: var(--border-b); }
+    .epc.open { border-color: var(--border-b); }
+    .epc-head { display: flex; align-items: center; gap: 9px; padding: 13px 15px; }
+    .ep-path { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; flex: 1; }
+    .ep-desc { font-size: 11.5px; color: var(--text-3); padding: 0 15px 11px; }
+    .ep-body { display: none; padding: 14px 15px; border-top: 1px solid var(--border); }
+    .epc.open .ep-body { display: block; }
+    .ep-body pre {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.75;
+      color: var(--text-2); background: var(--code-bg); border: 1px solid var(--border);
+      border-radius: 6px; padding: 12px; overflow-x: auto; white-space: pre;
+    }
+    .mb { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 9.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+    .mg { background: var(--accent-dim); color: var(--accent); }
+    .mp { background: var(--purple-dim); color: var(--purple); }
+    .sp { width: 6px; height: 6px; border-radius: 50%; display: inline-block; }
+    .sp-p { background: var(--accent); }
+    .sp-a { background: var(--purple); }
+    .sp-u { background: var(--amber); }
+    .ep-scope-dots { display: flex; gap: 4px; align-items: center; }
+    .scope-legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-top: 20px; }
+    .sl-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
+
+    /* ── QUICKSTART ── */
+    #qs { background: var(--bg-2); }
+    .qs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 44px; align-items: start; margin-top: 44px; }
+    .step-list { display: flex; flex-direction: column; }
+    .step {
+      display: flex; gap: 18px; padding: 18px 0;
+      border-bottom: 1px solid var(--border); cursor: pointer; transition: opacity .2s;
+    }
+    .step:last-child { border-bottom: none; }
+    .step:hover { opacity: .8; }
+    .step.on .sn { background: var(--accent); color: #03080e; border-color: var(--accent); }
+    .sn {
+      width: 30px; height: 30px; flex-shrink: 0;
+      border: 1px solid var(--border-b); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700; color: var(--text-2);
+      transition: all .2s;
+    }
+    .st-text h4 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+    .st-text p { font-size: 12.5px; color: var(--text-2); }
+
+    /* ── FOOTER ── */
+    footer { padding: 36px 0; border-top: 1px solid var(--border); text-align: center; }
+    .f-logo { font-family: 'Syne', sans-serif; font-size: 15px; font-weight: 700; color: var(--text-2); margin-bottom: 8px; }
+    .f-sub { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-3); }
+
+    /* ── FADE-IN ── */
+    .fi-anim { opacity: 0; transform: translateY(18px); transition: opacity .55s ease, transform .55s ease; }
+    .fi-anim.vis { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 780px) {
+      .hero-inner, .tc-grid, .scope-grid, .ep-grid, .qs-grid, .flow { grid-template-columns: 1fr; }
+      .hero-visual, .flow-arr, .nav-links { display: none; }
+      .flow { display: flex; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-gem"></div>
+    PachiMind API
+  </a>
+  <ul class="nav-links">
+    <li><a href="#how">Cómo funciona</a></li>
+    <li><a href="#for-devs">Integraciones</a></li>
+    <li><a href="#scopes">Permisos</a></li>
+    <li><a href="#endpoints">Endpoints</a></li>
+  </ul>
+  <a href="#qs" class="nav-cta">Quick start →</a>
+</nav>
+
+<!-- ── HERO ── -->
+<section id="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-dots"></div>
+  <div class="hero-inner">
+    <div>
+      <div class="hero-pill">FastAPI · Python 3.11 · Sin base de datos</div>
+      <h1 class="hero-h1">Tu vault de Obsidian.<br><span class="hl">Una API</span> lista<br>para producción.</h1>
+      <p class="hero-sub">Lee archivos <code>.md</code> directamente del sistema de archivos. Índice en memoria con hot-reload. Control de acceso por scopes. 14 endpoints REST sin configurar nada más que una ruta.</p>
+      <div class="hero-btns">
+        <a href="#endpoints" class="btn-p">Ver endpoints →</a>
+        <a href="#qs" class="btn-g">Quick start</a>
+      </div>
+      <div class="hero-metrics">
+        <div><span class="hm-num">14</span><span class="hm-lab">endpoints</span></div>
+        <div><span class="hm-num">3</span><span class="hm-lab">scopes</span></div>
+        <div><span class="hm-num">0ms</span><span class="hm-lab">latencia DB</span></div>
+        <div><span class="hm-num">∞</span><span class="hm-lab">hot-reload</span></div>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <div class="hv-card hv-top">
+        <div class="hv-bar">
+          <div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div>
+          <span class="hv-fname">proyecto-acme.md</span>
+        </div>
+<span class="yc">---</span>
+<span class="yk">tipo</span><span class="yc">: </span><span class="ys">proyecto</span>
+<span class="yk">estado</span><span class="yc">: </span><span class="ys">activo</span>
+<span class="yk">area</span><span class="yc">: </span><span class="ys">Laboral</span>
+<span class="yk">cliente</span><span class="yc">: </span><span class="ys">Acme Corp</span>
+<span class="yk">prioridad</span><span class="yc">: </span><span class="ys">alta</span>
+<span class="yk">ia_permiso</span><span class="yc">: </span><span class="yb">allow</span>
+<span class="yk">ia_indexar</span><span class="yc">: </span><span class="yb">true</span>
+<span class="yc">---</span>
+      </div>
+      <div class="hv-arrow">→</div>
+      <div class="hv-card hv-bot">
+        <div class="hv-bar">
+          <span class="badge-get">GET</span>
+          <span style="font-size:11px;color:var(--text-2)">/notes?tipo=proyecto</span>
+          <span class="status-ok">200 OK</span>
+        </div>
+<span class="jb">{</span>
+  <span class="jk">"id"</span><span class="jb">: </span><span class="js">"05-proyectos-laboral-acme"</span><span class="jb">,</span>
+  <span class="jk">"title"</span><span class="jb">: </span><span class="js">"Proyecto Acme"</span><span class="jb">,</span>
+  <span class="jk">"estado"</span><span class="jb">: </span><span class="js">"activo"</span><span class="jb">,</span>
+  <span class="jk">"prioridad"</span><span class="jb">: </span><span class="js">"alta"</span><span class="jb">,</span>
+  <span class="jk">"score"</span><span class="jb">: </span><span class="jn">0.95</span>
+<span class="jb">}</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ── -->
+<section id="how">
+  <div class="container">
+    <div class="s-ey">Arquitectura</div>
+    <h2 class="s-h2">Sin base de datos. Sin sincronización.</h2>
+    <p class="s-sub">El vault de Obsidian <em>es</em> el backend. La API lo lee, lo indexa, y lo sirve.</p>
+
+    <div class="flow fi-anim">
+      <div class="flow-card">
+        <div class="flow-n">01 / Escribís</div>
+        <div class="flow-icon">📝</div>
+        <div class="flow-title">Obsidian como fuente</div>
+        <div class="flow-desc">Cada nota es un <code>.md</code> con YAML frontmatter. Sin sync, sin export — el vault es la verdad.</div>
+        <div class="flow-snippet"><span class="yc">---</span>
+<span class="yk">tipo</span>: <span class="ys">proyecto</span>
+<span class="yk">ia_indexar</span>: <span class="yb">true</span>
+<span class="yc">---</span></div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-card">
+        <div class="flow-n">02 / La API indexa</div>
+        <div class="flow-icon">⚡</div>
+        <div class="flow-title">Índice en memoria</div>
+        <div class="flow-desc">Al arrancar escanea todos los <code>.md</code>. Un watcher mantiene el índice actualizado en tiempo real.</div>
+        <div class="flow-snippet"><span style="color:var(--accent)">VaultIndex</span>.build(path)
+<span class="yc"># 142 notas indexadas</span>
+<span class="yc"># watchdog: hot-reload</span></div>
+      </div>
+      <div class="flow-arr">→</div>
+      <div class="flow-card">
+        <div class="flow-n">03 / Tu app consume</div>
+        <div class="flow-icon">🔌</div>
+        <div class="flow-title">REST API con scopes</div>
+        <div class="flow-desc">14 endpoints. La API key determina el scope — qué notas son visibles y con qué nivel de detalle.</div>
+        <div class="flow-snippet"><span class="yc">GET</span>  /notes?tipo=proyecto
+<span class="yc">POST</span> /ai/context
+<span class="yc">GET</span>  /search?q=acme</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── TABS ── -->
+<section id="for-devs">
+  <div class="container">
+    <div class="s-ey">Integraciones</div>
+    <h2 class="s-h2">¿Quién lo puede usar?</h2>
+    <p class="s-sub">Tres perfiles, cada uno con su propia API key y reglas de acceso.</p>
+
+    <div class="tabs-bar">
+      <button class="tb on" data-tab="fe">Frontend Developer</button>
+      <button class="tb" data-tab="ob">Desde Obsidian</button>
+      <button class="tb" data-tab="ex">Integración Externa</button>
+    </div>
+
+    <!-- Frontend -->
+    <div class="tp on" id="tp-fe">
+      <div class="tc-grid">
+        <div>
+          <div class="fi">
+            <div class="fi-icon">🔑</div>
+            <div class="fi-text"><h4>Autenticación por header</h4><p>Toda request lleva <code>X-API-Key</code>. La clave determina el scope automáticamente — sin login, sin JWT.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">🔍</div>
+            <div class="fi-text"><h4>Búsqueda fuzzy incluida</h4><p><code>GET /search</code> con cualquier texto. RapidFuzz rankea por relevancia. Filtrá por tipo, área, estado.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">🤖</div>
+            <div class="fi-text"><h4>Contexto para LLMs</h4><p><code>POST /ai/context</code> devuelve las notas más relevantes para un query. Ideal para RAG — solo llegan notas con <code>ia_permiso: allow</code>.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">📤</div>
+            <div class="fi-text"><h4>Escritura al vault</h4><p>Con scope <code>personal</code>, creás notas y borradores directamente en el vault desde tu app.</p></div>
+          </div>
+        </div>
+        <div class="cb">
+          <div class="cb-head"><span class="cb-lang">JavaScript — fetch</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body"><span class="cm">// Helper base</span>
+<span class="kw">const</span> <span class="cn">API</span> = <span class="st">'https://api.pachimind.app'</span>
+<span class="kw">const</span> <span class="cn">KEY</span> = <span class="st">'tu-api-key'</span>
+
+<span class="kw">const</span> pm = (path, opts = {}) =>
+  fetch(<span class="st">`${API}${path}`</span>, {
+    ...opts,
+    headers: {
+      <span class="st">'X-API-Key'</span>: <span class="cn">KEY</span>,
+      <span class="st">'Content-Type'</span>: <span class="st">'application/json'</span>,
+      ...opts.headers
+    }
+  }).<span class="fn">then</span>(r => r.<span class="fn">json</span>())
+
+<span class="cm">// Proyectos activos</span>
+<span class="kw">const</span> proyectos = <span class="kw">await</span> pm(<span class="st">'/projects/active?area=Laboral'</span>)
+
+<span class="cm">// Búsqueda fuzzy</span>
+<span class="kw">const</span> hits = <span class="kw">await</span> pm(<span class="st">'/search?q=acme&tipo=proyecto'</span>)
+
+<span class="cm">// Contexto para IA</span>
+<span class="kw">const</span> ctx = <span class="kw">await</span> pm(<span class="st">'/ai/context'</span>, {
+  method: <span class="st">'POST'</span>,
+  body: JSON.<span class="fn">stringify</span>({
+    query: <span class="st">'proyectos activos Q2'</span>,
+    filters: { area: <span class="st">'Laboral'</span> },
+    max_results: 5
+  })
+})</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Obsidian -->
+    <div class="tp" id="tp-ob">
+      <div class="tc-grid">
+        <div>
+          <div class="fi">
+            <div class="fi-icon">📁</div>
+            <div class="fi-text"><h4>Estructura de carpetas</h4><p>La carpeta donde guardás una nota determina qué tipo es. El frontmatter agrega metadatos: tipo, área, sensibilidad, permisos de IA.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">🔒</div>
+            <div class="fi-text"><h4>Control de privacidad por nota</h4><p>Cada nota decide su visibilidad con <code>sensibilidad</code> e <code>ia_permiso</code>. <code>secreto</code> = nunca visible externamente.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">🔗</div>
+            <div class="fi-text"><h4>Wikilinks resueltos</h4><p>Los <code>[[wikilinks]]</code> se resuelven a IDs de la API automáticamente en <code>GET /notes/{id}</code>.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">⚡</div>
+            <div class="fi-text"><h4>Hot-reload</h4><p>Guardás en Obsidian — la API actualiza el índice en tiempo real. Sin reiniciar el servidor.</p></div>
+          </div>
+        </div>
+        <div class="cb">
+          <div class="cb-head"><span class="cb-lang">YAML — frontmatter de una nota</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body"><span class="yc">---</span>
+<span class="yk">tipo</span>: proyecto
+<span class="cm">  # proyecto | accion | decision | persona</span>
+<span class="cm">  # cliente | reunion | registro | idea | nota</span>
+
+<span class="yk">estado</span>: activo
+<span class="cm">  # activo | en_proceso | borrador | archivado</span>
+
+<span class="yk">area</span>: Laboral
+<span class="cm">  # Personal | Laboral | Familia | Amigos | Apostolado</span>
+
+<span class="yk">sensibilidad</span>: normal
+<span class="cm">  # normal   → visible para todos los scopes</span>
+<span class="cm">  # interno  → solo personal</span>
+<span class="cm">  # privado  → solo personal</span>
+<span class="cm">  # secreto  → nunca visible por API</span>
+
+<span class="yk">ia_permiso</span>: allow
+<span class="cm">  # allow        → /ai/context puede incluirla</span>
+<span class="cm">  # summary_only → solo excerpt (scope personal)</span>
+<span class="cm">  # deny         → excluida de /ai/context</span>
+
+<span class="yk">ia_indexar</span>: true
+<span class="yk">revisado</span>: false
+<span class="yk">cliente</span>: Acme Corp
+<span class="yk">prioridad</span>: alta
+<span class="yk">tags</span>:
+  - estrategia
+  - q2
+<span class="yc">---</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- External -->
+    <div class="tp" id="tp-ex">
+      <div class="tc-grid">
+        <div>
+          <div class="fi">
+            <div class="fi-icon">🌐</div>
+            <div class="fi-text"><h4>Scope public</h4><p>Solo notas con <code>sensibilidad: normal</code>. Para mostrar contenido en sitios web o widgets sin exponer nada interno.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">🤖</div>
+            <div class="fi-text"><h4>Scope ai_context</h4><p>Para agentes IA. Solo notas con <code>ia_permiso: allow</code> + <code>ia_indexar: true</code>. Nunca recibe contenido completo — solo excerpts de 400 chars.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">📋</div>
+            <div class="fi-text"><h4>Sin contenido completo</h4><p>Los scopes externos nunca reciben el markdown completo. Solo <code>excerpt</code> de texto plano. La privacidad se garantiza en el servidor.</p></div>
+          </div>
+          <div class="fi">
+            <div class="fi-icon">📥</div>
+            <div class="fi-text"><h4>ai_context puede escribir</h4><p>El scope <code>ai_context</code> puede depositar borradores en el inbox vía <code>POST /inbox/draft</code> para revisión manual.</p></div>
+          </div>
+        </div>
+        <div class="cb">
+          <div class="cb-head"><span class="cb-lang">curl — integración externa</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body"><span class="cm"># Scope public: listar proyectos</span>
+curl https://api.pachimind.app/projects/active \
+  -H <span class="st">"X-API-Key: clave-publica"</span>
+
+<span class="cm"># Scope ai_context: contexto para tu LLM</span>
+curl -X POST https://api.pachimind.app/ai/context \
+  -H <span class="st">"X-API-Key: clave-ia"</span> \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{
+    "query": "decisiones recientes sobre arquitectura",
+    "max_results": 5
+  }'</span>
+
+<span class="cm"># ai_context deposita un borrador al inbox</span>
+curl -X POST https://api.pachimind.app/inbox/draft \
+  -H <span class="st">"X-API-Key: clave-ia"</span> \
+  -H <span class="st">"Content-Type: application/json"</span> \
+  -d <span class="st">'{
+    "title": "Insight generado por IA",
+    "content": "...",
+    "area": "Laboral"
+  }'</span>
+
+<span class="cm"># Respuesta siempre:</span>
+<span class="cm"># "content": null  ← nunca contenido completo</span>
+<span class="cm"># "excerpt": "primeros 400 chars..."</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── SCOPES ── -->
+<section id="scopes">
+  <div class="container">
+    <div class="s-ey">Control de acceso</div>
+    <h2 class="s-h2">Tres scopes. Una API key.</h2>
+    <p class="s-sub">El valor de <code>X-API-Key</code> determina automáticamente qué puede ver y hacer cada cliente.</p>
+
+    <div class="scope-grid fi-anim">
+      <div class="sc p">
+        <div class="sc-tag p">personal</div>
+        <div class="sc-title">Acceso completo</div>
+        <div class="sc-desc">Para el propietario del vault. Ve todo excepto notas marcadas como <code>secreto</code>. Puede leer y escribir.</div>
+        <ul class="sc-rules">
+          <li class="sc-rule"><span class="ri y">✓</span> Contenido markdown completo</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Crear notas (POST /notes)</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Crear borradores (POST /inbox/draft)</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Sensibilidad: normal, interno, privado</li>
+          <li class="sc-rule"><span class="ri n">✗</span> Sensibilidad: secreto (siempre bloqueado)</li>
+        </ul>
+      </div>
+      <div class="sc a">
+        <div class="sc-tag a">ai_context</div>
+        <div class="sc-title">Para agentes IA</div>
+        <div class="sc-desc">Para LLMs y agentes. Solo notas explícitamente habilitadas para IA. Nunca recibe contenido completo.</div>
+        <ul class="sc-rules">
+          <li class="sc-rule"><span class="ri m">~</span> Solo excerpt (400 chars)</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Puede depositar borradores al inbox</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Solo notas con <code>ia_permiso: allow</code></li>
+          <li class="sc-rule"><span class="ri y">✓</span> Solo notas con <code>ia_indexar: true</code></li>
+          <li class="sc-rule"><span class="ri n">✗</span> Sensibilidad: privado, sensible, secreto</li>
+        </ul>
+      </div>
+      <div class="sc u">
+        <div class="sc-tag u">public</div>
+        <div class="sc-title">Solo lectura pública</div>
+        <div class="sc-desc">Para sitios web e integraciones externas. Solo notas sin ninguna marca de sensibilidad especial.</div>
+        <ul class="sc-rules">
+          <li class="sc-rule"><span class="ri m">~</span> Solo excerpt (400 chars)</li>
+          <li class="sc-rule"><span class="ri n">✗</span> No puede crear nada</li>
+          <li class="sc-rule"><span class="ri n">✗</span> Sin acceso a /ai/context</li>
+          <li class="sc-rule"><span class="ri y">✓</span> Solo sensibilidad: normal</li>
+          <li class="sc-rule"><span class="ri n">✗</span> Interno, privado, sensible, secreto</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── ENDPOINTS ── -->
+<section id="endpoints">
+  <div class="container">
+    <div class="s-ey">Referencia</div>
+    <h2 class="s-h2">14 endpoints.</h2>
+    <p class="s-sub">Hacé clic en cualquier endpoint para ver parámetros y ejemplo de respuesta.</p>
+
+    <div class="ep-filters">
+      <button class="ef on" data-f="all">Todos</button>
+      <button class="ef" data-f="sistema">Sistema</button>
+      <button class="ef" data-f="notas">Notas</button>
+      <button class="ef" data-f="busqueda">Búsqueda</button>
+      <button class="ef" data-f="ia">IA</button>
+      <button class="ef" data-f="entidades">Entidades</button>
+    </div>
+
+    <div class="ep-grid">
+
+      <div class="epc" data-cat="sistema" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/health</span><span style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',monospace">sin auth</span></div>
+        <div class="ep-desc">Estado de la API y número de notas indexadas</div>
+        <div class="ep-body"><pre>// Response 200
+{
+  "status": "ok",
+  "vault_connected": true,
+  "indexed_notes": 142
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="sistema" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/vault/stats</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Totales por tipo, área, notas IA-indexables y pendientes de revisión</div>
+        <div class="ep-body"><pre>// Response 200
+{
+  "total_notes": 142,
+  "by_type": { "proyecto": 18, "accion": 34, "nota": 45 },
+  "by_area": { "Laboral": 80, "Personal": 40 },
+  "ai_indexable_notes": 98,
+  "notes_to_review": 12
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="sistema" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/vault/activity</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Últimas notas añadidas, procesadas por IA y pendientes de revisión (máx 6 c/u)</div>
+        <div class="ep-body"><pre>// Response 200
+{
+  "recently_added":  [...],   // últimas 6 por fecha de modificación
+  "processed_by_ai": [...],   // notas con origen: inbox_ia
+  "pending_review":  [...]    // revisado: false, estado activo
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="notas" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/notes</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Lista paginada con filtros por cualquier campo del frontmatter</div>
+        <div class="ep-body"><pre>// Query params opcionales:
+// area, tipo, estado, sensibilidad, cliente
+// organizacion, persona, proyecto, marca, tag
+// revisado (bool), prioridad
+// page (default 1), per_page (default 20, máx 100)
+
+// Response 200
+{
+  "total": 45, "page": 1, "per_page": 20,
+  "results": [{ "id": "...", "title": "...", "excerpt": "..." }]
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="notas" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/notes/{note_id}</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Nota completa con wikilinks resueltos. Contenido completo solo en scope personal.</div>
+        <div class="ep-body"><pre>// Response 200
+{
+  "id": "05-proyectos-laboral-acme",
+  "title": "Proyecto Acme",
+  "metadata": { "tipo": "proyecto", "estado": "activo", ... },
+  "content": "# Proyecto...",   // null si scope != personal
+  "excerpt": "primeros 400 chars...",
+  "resolved_links": { "Juan Pérez": "04-entidades-personas-juan" }
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="notas" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mp">POST</span><span class="ep-path">/notes</span><div class="ep-scope-dots"><span class="sp sp-p"></span></div></div>
+        <div class="ep-desc">Crea una nota en la carpeta correcta según tipo. Solo scope personal.</div>
+        <div class="ep-body"><pre>// Body JSON
+{
+  "title": "Reunión con Acme",      // requerido
+  "tipo": "reunion",                // determina la carpeta destino
+  "area": "Laboral",
+  "estado": "activo",
+  "content": "## Agenda\n\n...",
+  "tags": ["cliente"], "cliente": "Acme",
+  "personas": ["Juan Pérez"],
+  "source_draft_id": "..."          // archiva el borrador origen
+}
+
+// Response 201
+{ "id": "...", "path": "06 Reuniones y Registros/Laboral/..." }</pre></div>
+      </div>
+
+      <div class="epc" data-cat="busqueda" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/search</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Búsqueda fuzzy sobre título + contenido. Score ≥ 0.5. Máx 50 resultados.</div>
+        <div class="ep-body"><pre>// Query params:
+// q (requerido, mín 2 chars)
+// area, tipo, estado, sensibilidad
+// limit (default 20, máx 50)
+
+// Response 200
+{
+  "query": "reunión acme", "total": 3,
+  "results": [{ "title": "...", "excerpt": "...", "score": 0.95 }]
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="ia" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mp">POST</span><span class="ep-path">/ai/context</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span></div></div>
+        <div class="ep-desc">Notas más relevantes para un query. Solo notas con ia_permiso:allow e ia_indexar:true.</div>
+        <div class="ep-body"><pre>// Body JSON
+{
+  "query": "proyectos activos cliente Acme Q2",
+  "filters": { "area": "Laboral", "tipo": "proyecto" },
+  "max_results": 10
+}
+
+// Response 200
+{
+  "query": "...",
+  "results": [{ "title": "...", "excerpt": "...", "score": 0.87 }]
+}
+
+// Reglas estrictas (hardcodeadas):
+// ia_permiso: allow + ia_indexar: true
+// sensibilidad fuera de: privado, sensible, secreto</pre></div>
+      </div>
+
+      <div class="epc" data-cat="ia" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mp">POST</span><span class="ep-path">/inbox/draft</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span></div></div>
+        <div class="ep-desc">Deposita borrador en 01 Inbox/Desde IA/. Queda con estado:borrador, ia_indexar:false.</div>
+        <div class="ep-body"><pre>// Body JSON
+{
+  "title": "Nota sobre reunión",    // requerido
+  "content": "Revisar contrato...",
+  "area": "Laboral",                // default: Personal
+  "tipo": "nota",
+  "cliente": "Acme",
+  "proyecto": "Proyecto Q2",
+  "tags": ["urgente"]
+}
+
+// Response 201
+{
+  "id": "01-inbox-desde-ia-2026-06-01-nota...",
+  "filename": "2026-06-01-nota-sobre-reunion.md"
+}</pre></div>
+      </div>
+
+      <div class="epc" data-cat="entidades" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/projects/active</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Proyectos activos/en_proceso/en_revision ordenados por prioridad.</div>
+        <div class="ep-body"><pre>// Query: area, cliente, prioridad
+// Response: array de NoteSummary
+// Orden: alta → media → baja → sin prioridad</pre></div>
+      </div>
+
+      <div class="epc" data-cat="entidades" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/actions/pending</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Acciones pendientes ordenadas por prioridad y luego por fecha ascendente.</div>
+        <div class="ep-body"><pre>// Query: area, proyecto, prioridad
+// Estados: pendiente | para_revisar | en_proceso | inbox
+// Response: array de NoteSummary</pre></div>
+      </div>
+
+      <div class="epc" data-cat="entidades" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/decisions</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Decisiones ordenadas por fecha descendente (más recientes primero).</div>
+        <div class="ep-body"><pre>// Query: area, proyecto
+// Query: fecha_desde (YYYY-MM-DD) — excluye anteriores a esa fecha
+// Response: array de NoteSummary</pre></div>
+      </div>
+
+      <div class="epc" data-cat="entidades" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/people</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Personas del vault (tipo: persona). Filtros por área, organización, cliente.</div>
+        <div class="ep-body"><pre>// Query: area, organizacion, cliente
+// Response: array de NoteSummary</pre></div>
+      </div>
+
+      <div class="epc" data-cat="entidades" onclick="tog(this)">
+        <div class="epc-head"><span class="mb mg">GET</span><span class="ep-path">/clients</span><div class="ep-scope-dots"><span class="sp sp-p"></span><span class="sp sp-a"></span><span class="sp sp-u"></span></div></div>
+        <div class="ep-desc">Clientes con conteo de proyectos y personas vinculadas.</div>
+        <div class="ep-body"><pre>// Response 200
+[{
+  "id": "04-entidades-clientes-acme",
+  "title": "Acme",
+  "status": "activo",
+  "projects_count": 3,
+  "people_count": 5
+}]</pre></div>
+      </div>
+
+    </div>
+
+    <div class="scope-legend">
+      <span style="font-size:12px;color:var(--text-3)">Scopes:</span>
+      <span class="sl-item"><span class="sp sp-p"></span> personal</span>
+      <span class="sl-item"><span class="sp sp-a"></span> ai_context</span>
+      <span class="sl-item"><span class="sp sp-u"></span> public</span>
+    </div>
+  </div>
+</section>
+
+<!-- ── QUICK START ── -->
+<section id="qs">
+  <div class="container">
+    <div class="s-ey">Setup</div>
+    <h2 class="s-h2">En cuatro pasos.</h2>
+    <p class="s-sub">Desde cero hasta primera request en menos de 5 minutos.</p>
+
+    <div class="qs-grid">
+      <div class="step-list">
+        <div class="step on" onclick="setStep(1,this)"><div class="sn">1</div><div class="st-text"><h4>Clonar e instalar</h4><p>Python 3.11+, virtual env, dependencias.</p></div></div>
+        <div class="step" onclick="setStep(2,this)"><div class="sn">2</div><div class="st-text"><h4>Configurar .env</h4><p>Ruta al vault y API keys con sus scopes.</p></div></div>
+        <div class="step" onclick="setStep(3,this)"><div class="sn">3</div><div class="st-text"><h4>Arrancar el servidor</h4><p>Uvicorn con hot-reload o Docker Compose.</p></div></div>
+        <div class="step" onclick="setStep(4,this)"><div class="sn">4</div><div class="st-text"><h4>Primera request</h4><p>Health check y primer listado de notas.</p></div></div>
+      </div>
+
+      <div id="qs-code">
+        <div class="cb" id="s1">
+          <div class="cb-head"><span class="cb-lang">bash — instalación</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body">git clone &lt;repo&gt; pachimind-api
+cd pachimind-api
+
+python -m venv .venv
+source .venv/bin/activate
+<span class="cm"># Windows: .venv\Scripts\activate</span>
+
+pip install -r requirements.txt</div>
+        </div>
+        <div class="cb" id="s2" style="display:none">
+          <div class="cb-head"><span class="cb-lang">bash — .env</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body">cp .env.example .env
+
+<span class="cm"># Editá .env:</span>
+<span class="kw">VAULT_PATH</span>=<span class="st">/ruta/absoluta/a/tu/vault</span>
+
+<span class="kw">API_KEYS</span>=<span class="st">{"mi-clave": "personal", "clave-ia": "ai_context", "publica": "public"}</span>
+
+<span class="kw">LOG_LEVEL</span>=<span class="st">INFO</span>
+<span class="kw">CORS_ORIGINS</span>=<span class="st">["http://localhost:3000"]</span></div>
+        </div>
+        <div class="cb" id="s3" style="display:none">
+          <div class="cb-head"><span class="cb-lang">bash — arrancar</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body"><span class="cm"># Desarrollo con hot-reload</span>
+uvicorn app.main:app --reload
+
+<span class="cm"># Producción</span>
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+<span class="cm"># Docker</span>
+docker compose up
+
+<span class="cm"># Docs interactivas → http://localhost:8000/docs</span></div>
+        </div>
+        <div class="cb" id="s4" style="display:none">
+          <div class="cb-head"><span class="cb-lang">bash — primera request</span><button class="cb-copy" onclick="cp(this)">Copiar</button></div>
+          <div class="cb-body"><span class="cm"># Health check (sin auth)</span>
+curl http://localhost:8000/health
+<span class="cm"># → {"status":"ok","vault_connected":true,"indexed_notes":142}</span>
+
+<span class="cm"># Listar notas</span>
+curl http://localhost:8000/notes \
+  -H <span class="st">"X-API-Key: mi-clave"</span>
+
+<span class="cm"># Búsqueda</span>
+curl <span class="st">"http://localhost:8000/search?q=acme"</span> \
+  -H <span class="st">"X-API-Key: mi-clave"</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="container">
+    <div class="f-logo">◆ PachiMind API</div>
+    <div class="f-sub">FastAPI · Python 3.11 · Obsidian vault as backend · No database</div>
+  </div>
+</footer>
+
+<script>
+  // Tabs
+  document.querySelectorAll('.tb').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.tb').forEach(x => x.classList.remove('on'))
+      document.querySelectorAll('.tp').forEach(x => x.classList.remove('on'))
+      b.classList.add('on')
+      document.getElementById('tp-' + b.dataset.tab).classList.add('on')
+    })
+  })
+
+  // Endpoint toggle
+  function tog(card) {
+    const was = card.classList.contains('open')
+    document.querySelectorAll('.epc.open').forEach(c => c.classList.remove('open'))
+    if (!was) card.classList.add('open')
+  }
+
+  // Filter endpoints
+  document.querySelectorAll('.ef').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.ef').forEach(x => x.classList.remove('on'))
+      b.classList.add('on')
+      const f = b.dataset.f
+      document.querySelectorAll('.epc').forEach(c => {
+        c.style.display = (f === 'all' || c.dataset.cat === f) ? '' : 'none'
+      })
+    })
+  })
+
+  // Steps
+  function setStep(n, el) {
+    document.querySelectorAll('.step').forEach(s => s.classList.remove('on'))
+    el.classList.add('on')
+    document.querySelectorAll('#qs-code .cb').forEach(c => c.style.display = 'none')
+    document.getElementById('s' + n).style.display = ''
+  }
+
+  // Copy
+  function cp(btn) {
+    const txt = btn.closest('.cb').querySelector('.cb-body').innerText
+    navigator.clipboard.writeText(txt).then(() => {
+      btn.textContent = '¡Copiado!'
+      setTimeout(() => btn.textContent = 'Copiar', 2000)
+    })
+  }
+
+  // Scroll fade-in
+  const obs = new IntersectionObserver(
+    es => es.forEach(e => { if (e.isIntersecting) e.target.classList.add('vis') }),
+    { threshold: 0.1 }
+  )
+  document.querySelectorAll('.fi-anim').forEach(el => obs.observe(el))
+</script>
+</body>
+</html>

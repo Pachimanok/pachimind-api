@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh root@212.85.22.34 *)",
+      "Bash(scp *)",
+      "Bash(curl -s *)",
+      "Bash(systemctl restart *)",
+      "Bash(systemctl is-active *)",
+      "Bash(journalctl -u *)",
+      "Bash(npx tsc *)",
+      "Bash(rsync *)"
+    ]
+  }
+}

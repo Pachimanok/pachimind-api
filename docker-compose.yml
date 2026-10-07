@@ -1,0 +1,13 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # monta el vault como read-only
+      - "${VAULT_PATH}:/vault:ro"
+    env_file:
+      - .env
+    environment:
+      - VAULT_PATH=/vault
+    restart: unless-stopped
