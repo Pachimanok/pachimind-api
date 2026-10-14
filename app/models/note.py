@@ -22,6 +22,20 @@ class NoteMetadata(BaseModel):
     tags: list[str] = []
     origen: str | None = None
     fuente_inmutable: bool = False
+    nombre: str | None = None
+    aliases: list[str] = []
+    ambitos: list[str] = []
+    rol: str | None = None
+    funcion: str | None = None
+    relacion_conmigo: str | None = None
+    contactos_profesionales: dict[str, str] = {}
+    notas_manuales: str | None = None
+    ultima_revision: str | None = None
+    datos_fuente: dict[str, list[dict]] = {}
+    clase_conocimiento: str | None = None
+    fuentes_ids: list[str] = []
+    segmentos_reservados: list[dict] = []
+    titulos_anteriores: list[str] = []
 
 
 class NoteModel(BaseModel):
@@ -43,6 +57,7 @@ class NoteResponse(BaseModel):
     content: str | None = None
     excerpt: str | None = None
     resolved_links: dict[str, str | None] = {}
+    revision: str | None = None
 
 
 class NoteSummary(BaseModel):

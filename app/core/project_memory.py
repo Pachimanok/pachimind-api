@@ -14,6 +14,12 @@ def reference(value):
     value = value.split('|', 1)[0].split('#', 1)[0].removesuffix('.md')
     return unicodedata.normalize('NFC', value).casefold().strip()
 
+def reference_labels(note):
+    # Historical title formatting is not a new identity or employment inference.
+    clean_title = re.sub(r'\[\[([^\]|]+)(?:\|[^\]]+)?\]\]', r'\1', note.title)
+    return {note.id, note.title, clean_title, note.path, note.path.removesuffix('.md'),
+            PurePosixPath(note.path).stem, *note.metadata.aliases, *note.metadata.titulos_anteriores}
+
 
 def is_source(note):
     return (not note.path.startswith(('00 Sistema/', '01 Inbox/', '10 Sensible/', '99 Adjuntos/', '.'))
@@ -26,20 +32,24 @@ def eligible(note, scope, for_ai=False):
             and (not for_ai or is_ai_eligible(note)))
 
 
-def build_memory(project, notes, scope, for_ai=False):
+def build_memory(project, notes, scope, for_ai=False, relationships=()):
     # Resolve only unambiguous explicit references. Same client is not same project.
     names = defaultdict(set)
     for note in notes:
-        for name in {note.title, note.path, PurePosixPath(note.path).stem}:
+        for name in reference_labels(note):
             names[reference(name)].add(note.id)
     def resolves(value, target):
         return names.get(reference(value), set()) == {target}
     available = [n for n in notes if eligible(n, scope, for_ai)]
     selected = [(project, 'ficha del proyecto')]
+    connected = {r['source_id'] if r['target_id'] == project.id else r['target_id']
+                 for r in relationships if project.id in (r['source_id'], r['target_id'])}
     for note in available:
         if note.id == project.id:
             continue
-        if any(resolves(v, project.id) for v in note.metadata.proyectos):
+        if note.id in connected:
+            selected.append((note, 'relación explícita revisada'))
+        elif any(resolves(v, project.id) for v in note.metadata.proyectos):
             selected.append((note, 'propiedad proyectos'))
         elif any(resolves(v, project.id) for v in note.wikilinks):
             selected.append((note, 'enlace al proyecto'))

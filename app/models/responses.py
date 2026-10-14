@@ -2,6 +2,49 @@ from datetime import datetime
 from pydantic import BaseModel
 from .note import NoteResponse
 
+class PersonProfile(BaseModel):
+    id: str
+    path: str
+    title: str
+    revision: str
+    fields: dict
+    metadata: dict
+    pending_fields: list[str]
+    field_sources: dict
+    relations: list[dict]
+    incoming_count: int
+    outgoing_count: int
+    broken_links: list[str]
+    ambiguous_links: list[str]
+    pending_changes: int
+    possible_duplicates: list[dict]
+    classification_warning: str | None = None
+    history: list[dict]
+    last_review: str | None = None
+    change_origin: str | None = None
+    original_content: str = ''
+
+class PeopleDirectory(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    results: list[PersonProfile]
+
+class PendingChanges(BaseModel):
+    total: int
+    page: int
+    per_page: int
+    results: list[dict]
+
+class OperationResult(BaseModel):
+    id: str
+    path: str | None = None
+    created: bool = False
+    revision: str | None = None
+    state: str | None = None
+    history_id: str | None = None
+    needs_identity_review: bool = False
+
 
 class PaginatedNotes(BaseModel):
     total: int

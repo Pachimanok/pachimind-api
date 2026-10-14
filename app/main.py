@@ -9,6 +9,7 @@ from app.config import settings
 from app.core.vault_index import vault_index
 from app.core.vault_watcher import start_watcher
 from app.routers import meetings, health, vault, notes, search, ai, projects, people, clients, decisions, actions, inbox, links, attachments, notebooklm
+from app.routers import people_workspace
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(people_workspace.router)
 app.include_router(health.router)
 app.include_router(vault.router)
 app.include_router(notes.router)

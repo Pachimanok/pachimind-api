@@ -1071,3 +1071,132 @@ El front usa `/api/memory/projects/...`, gateway autenticado de Node hacia `/pro
 ## TODO de actividades (2026-10-03)
 
 `GET /actions/todo`, `POST /actions/todo`, `PATCH /actions/todo/{note_id}` requieren scope personal. Creación con UUID request_id, title, detalle, area, project_id opcional, responsable, vencimiento ISO y prioridad alta/media/baja. El PATCH requiere revision (SHA-256 devuelto por GET) y admite estado pendiente/en_proceso/completado, responsable, vencimiento y prioridad. Revision obsoleta devuelve 409. Las notas se guardan en `09 Acciones/TODO`; las acciones aprobadas de reuniones también aparecen. Propuestas del Inbox, archivos y fuentes inmutables no se editan desde TODO. No se cambia el cuerpo de la nota al actualizar sus campos.
+
+# Personas y conocimiento — primera versión, octubre 2026
+
+Estas rutas son aditivas y reutilizan IDs/rutas del vault. `X-PachiMind-Actor: assistant`
+activa las restricciones IA, incluso si el servicio posee una clave personal. Las
+lecturas con clave `ai_context` siempre usan ese modo. Todas las escrituras requieren
+scope API `personal`; MCP exige adicionalmente OAuth `pachimind:write` y fija el actor.
+No se alteran las conexiones OAuth ni la selección de cuenta.
+
+## GET /people/directory
+
+Buscador paginado por `q` (nombre, alias, organización), `ambito` (Trabajo, Apostólico,
+Colegios, Formación), `view` (incomplete, pending, unconnected, no_outgoing, duplicates),
+`page` >= 1 y `per_page` 1..100. Devuelve `{total,page,per_page,results}`. Cada resultado
+incluye campos, permisos, revisión, fuentes, conexiones entrantes/salientes, datos
+pendientes, propuestas, posibles duplicados y advertencias de clasificación.
+`unconnected` cuenta ambas direcciones; `no_outgoing` no implica ausencia de conexiones.
+Se consideran sólo nodos y evidencia visibles para el scope actual.
+
+## GET /people/{person_id}/profile
+
+Ficha existente con `revision` SHA-256 compuesto por archivo y capa de relaciones.
+`fields` contiene datos almacenados; `metadata.revisado` distingue su revisión.
+`field_sources` incluye IDs, ruta, fecha registrada y cita literal cuando existen.
+`original_content` respeta las reglas de contenido/excerpt de la API. Los cuerpos
+originales se conservan. Las propuestas no sustituyen los campos antes de aplicar.
+
+## POST /people/drafts
+
+Creación mínima: `{"request_id":"UUID","nombre":"Nombre"}`. Otros datos quedan
+pendientes. Usa `04 Entidades/Personas/`; no crea directorios paralelos. Coincidencia
+exacta devuelve el ID existente, `created:false` y `needs_identity_review:true`, sin
+modificarlo ni afirmar identidad. Similitudes requieren revisión: `distinct_from`
+puede enumerar IDs que el usuario comprobó que son personas distintas. Nunca fusiona.
+Un UUID repetido con otro contenido devuelve 409. Para reintentos conservar el UUID.
+
+## PATCH /people/{person_id}/profile
+
+Edición manual: `request_id`, `revision`, `fields` y opcional `confirm_review`.
+Campos permitidos: nombre, aliases, organizacion, funcion, relacion_conmigo, ambitos,
+contactos_profesionales (email_profesional, telefono_profesional, perfil_profesional),
+notas_manuales y tipo (persona, idea, recurso, nota). No cambia permisos IA.
+Confirmar revisión es una acción humana. Actor assistant no puede editar directamente.
+Un conflicto devuelve 409; no reintentar cambiando revision sin revisar lo ocurrido.
+El archivo conserva ruta/ID y cuerpo. La clasificación no mueve archivos.
+
+## POST /people/{person_id}/proposals
+
+`request_id`, `revision`, `fields`, `evidence` y opcional `questions`.
+Cada evidencia usa `{field,source_id,quote}`; la cita debe existir literalmente en
+una fuente disponible. Cada campo necesita evidencia propia. El asistente debe
+proponer valores personales explícitos, no deducir cargos o parentescos. Una pregunta
+puede quedar pendiente sin campos; no se aplica como hecho. Los cambios se guardan
+separados en `.pachimind/changes`, no dentro de la ficha ni del procesador de Inbox.
+
+## GET /people/changes
+
+Propuestas pendientes paginadas; filtros `note_id`, `page`, `per_page`.
+Incluye cambios de ficha y relaciones que afectan al ID, entrantes o salientes.
+Devuelve destinos y origen reales para revisión. Excluye evidencia o notas reservadas.
+
+## POST /people/changes/{change_id}/review
+
+`request_id`, `revision`, `action` (apply/reject), `authorized_fields` y opcional
+`expected_kind` (person/links). Para aplicar deben autorizarse todos y sólo los campos
+mostrados; para relaciones usar `["relations"]`. Revalida origen, destinos, tipo,
+permisos, revisión base y hash de cada fuente. Ante conflicto exige propuesta nueva.
+Actor assistant no aplica sobre revisado=true, ia_editar=false o fuente_inmutable.
+Una persona inmutable conserva su corrección separada; no se sobrescribe ni manualmente.
+La revisión manual puede confirmar fichas mutables. `reject` conserva el original.
+Devuelve ID, revisión, estado y `history_id` cuando hubo cambios.
+
+## POST /vault/relations/proposals
+
+`request_id`, `source_id`, `revision`, `links` y opcional `reserved_segments`.
+Cada enlace usa `{target_id,target_revision,relation,action,evidence?}`. Tipos:
+participó en, mencionado en, trabaja con, vinculado al proyecto, fuente,
+relacionado con, referencia. Action: add/remove. Valida tipos de origen/destino.
+La IA necesita evidencia literal para agregar; participación sólo se acepta desde
+participantes explícitamente identificados en una captura, nunca por una mención.
+Las anotaciones de fuentes inmutables se aplican manualmente en una capa separada.
+Quitar una referencia heredada la suprime en esa capa, sin reescribir el original.
+
+## GET /vault/relations
+
+Grafo filtrado por permisos: `{nodes,relations}`. Integra wikilinks, propiedades
+explícitas y relaciones revisadas por ID. No convierte menciones en enlaces, no usa
+fuzzy matching para resolver destinos y no expone contenido/IDs de notas reservadas.
+Los enlaces ambiguos se señalan para revisión. La memoria y su exportación integran
+esta capa, sin incluir borradores o fuentes no habilitadas para IA.
+
+## POST /notes/knowledge-drafts
+
+`request_id`, `title`, `kind` (contexto/resumen/lectura), `content`, `source_ids` y
+opcional `reserved_segments`. Crea un borrador derivado en `07 Conocimiento/`, no
+una reunión ni una tarea. No recibe ni inventa `fecha`; guarda sólo creación técnica.
+Conserva las fuentes, hereda su sensibilidad más restrictiva y queda sin revisión,
+con ia_indexar=false. Segmentos reservados: `{source_reference,start_seconds,end_seconds}`;
+sólo localizador opaco o HTTPS sin credenciales/query, timestamps y etiqueta neutral.
+No importa contenido del segmento ni modifica permisos de las fuentes.
+
+## POST /people/history/{history_id}/undo
+
+Sólo manual: `request_id`, `revision`. Revierte únicamente los archivos de esa
+operación si sus hashes posteriores coinciden; no pisa modificaciones nuevas.
+Conserva historial y originales. Puede deshacer borradores creados por esta portada
+si no cambiaron; nunca borra una fuente referenciada. Relaciones JSON se revierten
+sin tocar el texto original. No se expone como herramienta MCP de borrado.
+
+## GET /actions/todo
+
+Endpoint existente: actividades personales, incluyendo acciones aprobadas de reuniones.
+Propuestas sin revisar quedan fuera. Devuelve revisión SHA para edición concurrente.
+
+## POST /actions/todo
+
+Endpoint existente: request_id UUID, title, detalle, area, project_id opcional,
+responsable, vencimiento y prioridad. Creación idempotente, scope personal.
+
+## PATCH /actions/todo/{note_id}
+
+Endpoint existente: revision y campos editables de la actividad. Ante cambio devuelve 409.
+
+Compatibilidad: `GET /people` sigue devolviendo su lista anterior. Crear personas vía
+`POST /notes` ahora requiere usar `/people/drafts`. `PATCH /notes/{note_id}` requiere
+revision para personas (428 si falta), para no eludir el control de concurrencia.
+`GET /notes/{note_id}` incorpora revision. Stats/activity, enlaces y contexto respetan
+las exclusiones. El autolinker no edita revisados, fuentes inmutables, ia_editar=false
+ni las fichas/borradores administrados por esta portada. No se migra el vault al iniciar.

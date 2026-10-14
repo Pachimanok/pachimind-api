@@ -58,7 +58,9 @@ def project_memory(project_id: str, for_ai: bool = False, scope: str = Depends(g
     project = vault_index.get(project_id)
     if not project or project.metadata.tipo != 'proyecto' or not eligible(project, scope, for_ai):
         raise HTTPException(404, 'Proyecto no disponible')
-    return build_memory(project, vault_index.all(), scope, for_ai)
+    from app.core.people import relation_rows
+    relationships, _, _ = relation_rows(scope, for_ai)
+    return build_memory(project, vault_index.all(), scope, for_ai, relationships)
 
 
 @router.get('/{project_id}/memory.md')

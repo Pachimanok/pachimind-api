@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from app.core.vault_index import vault_index
 from app.middleware.auth import get_scope
+from app.middleware.permissions import is_visible
 from app.models.responses import VaultStats, VaultActivity, ActivityNote
 
 router = APIRouter(prefix="/vault", tags=["vault"])
@@ -8,12 +9,12 @@ router = APIRouter(prefix="/vault", tags=["vault"])
 
 @router.get("/stats", response_model=VaultStats)
 def vault_stats(scope: str = Depends(get_scope)):
-    return VaultStats(**vault_index.stats())
+    return VaultStats(**vault_index.stats([n for n in vault_index.all() if is_visible(n, scope)]))
 
 
 @router.get("/activity", response_model=VaultActivity)
 def vault_activity(scope: str = Depends(get_scope)):
-    notes = vault_index.all()
+    notes = [n for n in vault_index.all() if is_visible(n, scope)]
 
     def to_activity(n):
         return ActivityNote(

@@ -11,6 +11,7 @@ from app.core.vault_linker import (
     _build_title_map, _to_wikilink, _clean_title, EXCLUDED_PREFIXES,
 )
 from app.middleware.auth import get_scope, SCOPE_PERSONAL
+from app.middleware.permissions import is_visible, is_ai_eligible, is_reserved_path
 
 router = APIRouter(prefix="/vault/links", tags=["links"])
 
@@ -63,7 +64,8 @@ def generate_vault_links(
 def broken_links(scope: str = Depends(get_scope)):
     """Lista todos los [[wikilinks]] que apuntan a notas inexistentes."""
     _require_personal(scope)
-    broken = get_broken_links(vault_index)
+    broken = [item for item in get_broken_links(vault_index)
+              if is_visible(vault_index.get(item['note_id']), scope) and not is_reserved_path(item['broken_link'])]
     return {"total": len(broken), "results": broken}
 
 
@@ -78,6 +80,8 @@ async def suggest_links(
     note = vault_index.get(note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Nota no encontrada")
+    if not is_ai_eligible(note):
+        raise HTTPException(403, "Esta nota no permite enviar contexto a IA")
     if note.metadata.fuente_inmutable:
         raise HTTPException(409, "Fuente original protegida. Usá la revisión de reuniones.")
     suggestions = await suggest_semantic_links(note, vault_index, max_suggestions)
@@ -115,7 +119,7 @@ def apply_links(body: ApplyLinksRequest, scope: str = Depends(get_scope)):
     for item in body.links:
         source = vault_index.get(item.source_id)
         target = vault_index.get(item.target_id)
-        if not source or not target:
+        if not source or not target or not is_visible(source, scope) or not is_visible(target, scope):
             results.append({"source_id": item.source_id, "ok": False, "error": "nota no encontrada"})
             continue
 

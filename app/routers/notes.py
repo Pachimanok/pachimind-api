@@ -1,13 +1,14 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from typing import Literal
 from pydantic import BaseModel
 
 from app.config import settings
 from app.core.note_writer import TIPO_FOLDER, write_note, delete_note
 from app.core.vault_index import vault_index
 from app.middleware.auth import get_scope
-from app.middleware.permissions import is_visible, apply_content_rules
+from app.middleware.permissions import is_visible, is_ai_eligible, apply_content_rules
 from app.models.filters import NoteFilters
 from app.models.responses import PaginatedNotes
 from app.models.note import NoteResponse, NoteMetadata
@@ -76,6 +77,9 @@ def create_note(body: NoteCreateRequest, scope: str = Depends(get_scope)):
     if scope not in ("personal",):
         raise HTTPException(status_code=403, detail="Scope insuficiente para crear notas")
 
+    if body.tipo == 'persona':
+        raise HTTPException(409, "Creá la ficha mínima desde Personas (/people/drafts), sin duplicar ni inferir datos")
+
     return write_note(
         title=body.title,
         tipo=body.tipo,
@@ -128,15 +132,19 @@ def promote_draft(note_id: str, body: PromoteRequest, scope: str = Depends(get_s
 
 
 @router.get("/{note_id}", response_model=NoteResponse)
-def get_note(note_id: str, scope: str = Depends(get_scope)):
+def get_note(note_id: str, scope: str = Depends(get_scope),
+             actor: Literal['manual', 'assistant'] = Header('manual', alias='X-PachiMind-Actor')):
     note = vault_index.get(note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Nota no encontrada")
     if not is_visible(note, scope):
         raise HTTPException(status_code=403, detail="Acceso denegado")
+    if (actor == 'assistant' or scope == 'ai_context') and not is_ai_eligible(note):
+        raise HTTPException(403, "Esta nota o sus fuentes no permiten acceso por IA")
 
     content, excerpt = apply_content_rules(note, scope)
-    resolved = vault_index.resolve_wikilinks(note.wikilinks)
+    resolved = vault_index.resolve_wikilinks(note.wikilinks, scope)
+    from app.core.people import revision
 
     return NoteResponse(
         id=note.id,
@@ -146,10 +154,12 @@ def get_note(note_id: str, scope: str = Depends(get_scope)):
         content=content,
         excerpt=excerpt,
         resolved_links=resolved,
+        revision=revision(note),
     )
 
 
 class NotePatchRequest(BaseModel):
+    revision: str | None = None
     tipo: str | None = None
     estado: str | None = None
     area: str | None = None
@@ -170,31 +180,32 @@ def patch_note(note_id: str, body: NotePatchRequest, scope: str = Depends(get_sc
     if scope != "personal":
         raise HTTPException(status_code=403, detail="Scope insuficiente")
 
-    note = vault_index.get(note_id)
-    if not note:
-        raise HTTPException(status_code=404, detail="Nota no encontrada")
-
-    if note.metadata.fuente_inmutable:
-        raise HTTPException(409, "Fuente original protegida. Registrá una corrección en otra nota.")
-    vault_root = Path(settings.vault_path)
-    file_path = vault_root / note.path
-
+    from app.core.meeting_capture import transaction, path_for, atomic_write
+    from app.core.people import node, person, require_revision
+    from hashlib import sha256
     import frontmatter as fm
-    post = fm.load(str(file_path))
-
-    fields = body.model_dump(exclude_none=True)
-    content = fields.pop("content", None)
-
-    for k, v in fields.items():
-        post.metadata[k] = v
-
-    if content is not None:
-        post.content = content
-
-    file_path.write_text(fm.dumps(post), encoding="utf-8")
-    vault_index.rebuild_file(file_path)
-
-    return {"id": note_id, "path": note.path}
+    with transaction():
+        note = node(note_id, scope)
+        if note.metadata.fuente_inmutable:
+            raise HTTPException(409, "Fuente original protegida. Registrá una corrección en otra nota.")
+        if person(note):
+            if body.revision is None:
+                raise HTTPException(428, "La edición de personas requiere revision; releé la ficha")
+            require_revision(note, body.revision)
+        file_path = path_for(note.path)
+        raw = file_path.read_bytes()
+        if not person(note) and body.revision and sha256(raw).hexdigest() != body.revision:
+            raise HTTPException(409, "La nota cambió. Releé antes de editar.")
+        post = fm.loads(raw.decode())
+        fields = body.model_dump(exclude_none=True)
+        fields.pop('revision', None)
+        content = fields.pop("content", None)
+        for key, value in fields.items():
+            post.metadata[key] = value
+        if content is not None:
+            post.content = content
+        atomic_write(note.path, fm.dumps(post), replace=True)
+        return {"id": note_id, "path": note.path}
 
 
 @router.delete("/{note_id}", status_code=200)

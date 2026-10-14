@@ -1,4 +1,9 @@
 from app.models.note import NoteModel
+from pathlib import PurePosixPath
+
+def is_reserved_path(path: str) -> bool:
+    return any(part.startswith(('.', '_privado_')) or part in {'00 Sistema', '10 Sensible', '99 Adjuntos'}
+               for part in PurePosixPath(path.replace('\\', '/')).parts)
 
 # Sensibilidades bloqueadas por scope
 SCOPE_RULES: dict[str, dict] = {
@@ -21,7 +26,9 @@ SCOPE_RULES: dict[str, dict] = {
 AI_BLOCKED_SENSIBILIDAD = {"sensible", "secreto", "privado"}
 
 
-def is_visible(note: NoteModel, scope: str) -> bool:
+def is_visible(note: NoteModel, scope: str, _seen=None) -> bool:
+    if is_reserved_path(note.path):
+        return False
     rules = SCOPE_RULES.get(scope, SCOPE_RULES["public"])
     if note.metadata.sensibilidad in rules["blocked_sensibilidad"]:
         return False
@@ -29,14 +36,27 @@ def is_visible(note: NoteModel, scope: str) -> bool:
         return False
     if rules.get("require_ia_indexar") and not note.metadata.ia_indexar:
         return False
+    if note.metadata.datos_fuente:
+        from app.core.vault_index import vault_index
+        seen = set(_seen or ())
+        if note.id in seen:
+            return True  # This node's own permissions were checked above; avoid recursion.
+        seen.add(note.id)
+        for proofs in note.metadata.datos_fuente.values():
+            for proof in proofs:
+                source = vault_index.get(proof.get('source_id', ''))
+                if not source or not is_visible(source, scope, seen):
+                    return False
     return True
 
 
 def is_ai_eligible(note: NoteModel) -> bool:
     return (
-        note.metadata.ia_permiso == "allow"
+        not is_reserved_path(note.path)
+        and note.metadata.ia_permiso == "allow"
         and note.metadata.ia_indexar is True
         and note.metadata.sensibilidad not in AI_BLOCKED_SENSIBILIDAD
+        and is_visible(note, 'ai_context')
     )
 
 

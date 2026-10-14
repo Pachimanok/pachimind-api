@@ -14,9 +14,14 @@ def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
 
         raw_meta = dict(post.metadata)
         content = post.content
+        for mapping in ('contactos_profesionales', 'datos_fuente'):
+            if raw_meta.get(mapping) is None:
+                raw_meta[mapping] = {}
 
         # Normalizar listas que pueden venir como string o tener elementos no-string (ej. 2024 como int)
-        for list_field in ("personas", "proyectos", "tags"):
+        if "aliases" not in raw_meta and "alias" in raw_meta:
+            raw_meta["aliases"] = raw_meta["alias"]
+        for list_field in ("personas", "proyectos", "tags", "aliases", "ambitos", "fuentes_ids", "titulos_anteriores"):
             val = raw_meta.get(list_field, [])
             if isinstance(val, str):
                 raw_meta[list_field] = [val] if val else []
@@ -34,8 +39,9 @@ def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
             ))
 
         # Normalizar fecha: YAML puede parsear "2022" o "2026-03" como datetime/int
-        if "fecha" in raw_meta and raw_meta["fecha"] is not None:
-            raw_meta["fecha"] = str(raw_meta["fecha"])
+        for field in ("fecha", "ultima_revision"):
+            if field in raw_meta and raw_meta[field] is not None:
+                raw_meta[field] = str(raw_meta[field])
 
         metadata = NoteMetadata.model_validate(raw_meta)
 

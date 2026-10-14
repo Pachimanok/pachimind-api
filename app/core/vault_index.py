@@ -47,6 +47,8 @@ class VaultIndex:
         note = parse_note(file_path, self._vault_root)
         if note:
             self._notes[note.id] = note
+        else:
+            self.remove_file(file_path)
 
     def remove_file(self, file_path: Path) -> None:
         file_path = file_path.resolve()
@@ -108,12 +110,23 @@ class VaultIndex:
         scored.sort(key=lambda x: -x[1])
         return scored[:limit]
 
-    def resolve_wikilinks(self, wikilinks: list[str]) -> dict[str, str | None]:
-        title_map = {n.title: n.id for n in self._notes.values()}
-        return {link: title_map.get(link) for link in wikilinks}
+    def resolve_wikilinks(self, wikilinks: list[str], scope='personal') -> dict[str, str | None]:
+        from collections import defaultdict
+        from app.core.project_memory import reference, reference_labels
+        from app.middleware.permissions import is_visible
+        names = defaultdict(set)
+        for n in self._notes.values():
+            for label in reference_labels(n):
+                names[reference(label)].add(n.id)
+        result = {}
+        for link in wikilinks:
+            candidates = names.get(reference(link), set())
+            target = self._notes[next(iter(candidates))] if len(candidates) == 1 else None
+            result[link] = target.id if target and is_visible(target, scope) else None
+        return result
 
-    def stats(self) -> dict:
-        notes = list(self._notes.values())
+    def stats(self, notes=None) -> dict:
+        notes = list(self._notes.values()) if notes is None else notes
         by_type: dict[str, int] = {}
         by_area: dict[str, int] = {}
         sensitive = 0
@@ -148,10 +161,11 @@ class VaultIndex:
     @staticmethod
     def _is_excluded(file_path: Path, vault_root: Path) -> bool:
         try:
-            relative = str(file_path.relative_to(vault_root))
+            relative = str(file_path.resolve().relative_to(vault_root.resolve()))
         except ValueError:
             return True
-        return any(relative.startswith(prefix) for prefix in EXCLUDED_PREFIXES)
+        from app.middleware.permissions import is_reserved_path
+        return is_reserved_path(relative) or any(relative.startswith(prefix) for prefix in EXCLUDED_PREFIXES)
 
 
 vault_index = VaultIndex()
