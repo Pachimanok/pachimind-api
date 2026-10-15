@@ -8,6 +8,7 @@ class PersonProfile(BaseModel):
     title: str
     revision: str
     fields: dict
+    personal_context: list[dict] = []
     metadata: dict
     pending_fields: list[str]
     field_sources: dict

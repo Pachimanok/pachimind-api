@@ -1113,6 +1113,14 @@ Edición manual: `request_id`, `revision`, `fields` y opcional `confirm_review`.
 Campos permitidos: nombre, aliases, organizacion, funcion, relacion_conmigo, ambitos,
 contactos_profesionales (email_profesional, telefono_profesional, perfil_profesional),
 notas_manuales y tipo (persona, idea, recurso, nota). No cambia permisos IA.
+También redes_sociales (linkedin/instagram/facebook/x/web/otra, URLs HTTPS sin
+credenciales/query/fragmentos), cumpleanos ({dia,mes,anio opcional}) y datos_generales
+(lista de {texto,categoria,fecha?,vigente_hasta?,estado}). Categorías: interes,
+preferencia,familia,evento,salud,otro; estados vigente,pendiente,finalizado; fechas
+YYYY-MM-DD. Listas se reemplazan completas con revisión, nunca se fusionan a ciegas.
+El perfil incluye personal_context con estado_actual y usar_como_hecho_actual.
+Salud sólo manual; una ficha con salud queda excluida de AI/public y de actores
+assistant. No se copia a evidencia o conocimiento. No hay recordatorios automáticos.
 Confirmar revisión es una acción humana. Actor assistant no puede editar directamente.
 Un conflicto devuelve 409; no reintentar cambiando revision sin revisar lo ocurrido.
 El archivo conserva ruta/ID y cuerpo. La clasificación no mueve archivos.

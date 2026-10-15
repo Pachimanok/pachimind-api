@@ -361,4 +361,67 @@ class PeopleWorkspaceTests(unittest.TestCase):
         result, _ = self.review(r.json()['id'], body['revision'], authorized=['relations'])
         self.assertEqual(result.status_code, 409); self.assertEqual(self.c.get('/vault/relations').json()['relations'], [])
 
+    def test_personal_context_roundtrip_retry_undo_and_original(self):
+        before = (self.root / vault_index.get(self.person).path).read_text()
+        body = {'request_id': str(uuid4()), 'revision': self.get()['revision'], 'fields': {
+            'redes_sociales': {'instagram': 'https://www.instagram.com/persona_demo'},
+            'cumpleanos': {'dia': 29, 'mes': 2},
+            'datos_generales': [{'texto': 'Es hincha de Belgrano (dato sintético)', 'categoria': 'interes'},
+                               {'texto': 'Evento de prueba', 'categoria': 'evento', 'fecha': '2026-10-22',
+                                'vigente_hasta': '2026-10-23', 'estado': 'pendiente'}]}}
+        r = self.c.patch('/people/'+self.person+'/profile', json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.c.patch('/people/'+self.person+'/profile', json=body).json(), r.json())
+        profile = self.get()
+        self.assertEqual(profile['fields']['cumpleanos'], {'dia': 29, 'mes': 2})
+        self.assertEqual(len(profile['fields']['datos_generales']), 2)
+        self.assertTrue(profile['personal_context'][0]['usar_como_hecho_actual'])
+        self.assertFalse(profile['personal_context'][1]['usar_como_hecho_actual'])
+        self.assertEqual(profile['original_content'], '# Iris Demo')
+        self.scope = 'public'
+        self.assertEqual(self.c.get('/people/'+self.person+'/profile').status_code, 404)
+        self.scope = 'personal'
+        undo = self.c.post('/people/history/'+body['request_id']+'/undo', json={'request_id': str(uuid4()), 'revision': profile['revision']})
+        self.assertEqual(undo.status_code, 200, undo.text)
+        self.assertEqual((self.root / vault_index.get(self.person).path).read_text(), before)
+
+    def test_expired_context_is_not_current(self):
+        from app.core.people import personal_context
+        result = personal_context({'datos_generales': [{'texto': 'Evento', 'categoria': 'evento', 'fecha': '2020-01-01'}, {'texto': 'Interés', 'estado': 'finalizado'}, {'texto': 'Temporal', 'vigente_hasta': '2020-01-02'}]})
+        self.assertEqual([f['estado_actual'] for f in result], ['fecha_pasada_verificar', 'finalizado', 'vencido'])
+        self.assertFalse(any(f['usar_como_hecho_actual'] for f in result))
+
+    def test_personal_context_validation(self):
+        cases = [ {'cumpleanos': {'dia': 30, 'mes': 2}}, {'cumpleanos': {'dia': 1}},
+                  {'redes_sociales': {'web': 'javascript:alert(1)'}},
+                  {'redes_sociales': {'web': 'https://user:password@example.com'}},
+                  {'redes_sociales': {'web': 'https://example.com?token=private'}},
+                  {'datos_generales': [{'texto': 'evento', 'fecha': 'el jueves'}]},
+                  {'datos_generales': [{'texto': 'evento', 'fecha': '2026-10-22', 'vigente_hasta': '2026-10-21'}]} ]
+        for fields in cases:
+            with self.subTest(fields=fields):
+                r = self.c.patch('/people/'+self.person+'/profile', json={'request_id': str(uuid4()), 'revision': self.get()['revision'], 'fields': fields})
+                self.assertEqual(r.status_code, 422, r.text)
+        self.assertIsNone(self.get()['fields']['cumpleanos'])
+
+    def test_health_context_is_manual_only_and_hidden_across_surfaces(self):
+        fields = {'datos_generales': [{'texto': 'Cirugía menor ficticia de prueba', 'categoria': 'salud', 'fecha': '2026-10-22', 'estado': 'pendiente'}]}
+        revision = self.get()['revision']
+        proposed = self.c.post('/people/'+self.person+'/proposals', headers=self.actor(True), json={
+            'request_id': str(uuid4()), 'revision': revision, 'fields': fields,
+            'evidence': [{'field': 'datos_generales', 'source_id': self.source, 'quote': 'Iris'}]})
+        self.assertEqual(proposed.status_code, 403, proposed.text)
+        r = self.c.patch('/people/'+self.person+'/profile', json={'request_id': str(uuid4()), 'revision': revision, 'fields': fields})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(self.get()['fields']['datos_generales'][0]['categoria'], 'salud')
+        self.assertEqual(self.c.get('/people/'+self.person+'/profile', headers=self.actor(True)).status_code, 404)
+        self.assertEqual(self.c.get('/notes/'+self.person, headers=self.actor(True)).status_code, 403)
+        for scope in ['ai_context', 'public']:
+            self.scope = scope
+            self.assertEqual(self.c.get('/notes/'+self.person).status_code, 403)
+            self.assertNotIn('Iris Demo', self.c.get('/people/directory').text)
+            self.assertNotIn(self.person, self.c.get('/vault/relations').text)
+        self.scope = 'personal'
+        self.assertNotIn('Cirugía', self.c.get('/ai/context').text)
+
 if __name__ == '__main__': unittest.main()

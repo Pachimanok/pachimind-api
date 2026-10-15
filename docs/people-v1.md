@@ -192,3 +192,28 @@ revisión, de más nueva a más vieja, antes de retirar la API nueva cuando corr
 El código anterior no interpreta la capa .pachimind; retirarla u ocultarla perdería
 vínculos, propuestas y trazabilidad. Conservarla para restauración posterior. No
 restaurar todo el vault encima de ediciones nuevas sin conciliación y aprobación.
+
+
+## Ampliación: contexto personal
+
+Se agregan redes sociales públicas, cumpleaños con año opcional y datos generales
+estructurados por categoría, fecha exacta, vigencia y estado. Toda ficha con estos campos queda fuera del scope público. Son opcionales, no
+contribuyen a la métrica de ficha incompleta y no se infieren. Datos generales y
+redes se reemplazan con revisión/idempotencia/historial como los demás campos.
+El original permanece intacto. Eventos viejos/vencidos/pendientes/finalizados llevan
+marca explícita y no se presentan como actuales en personal_context para MCP.
+No crea recordatorios, no busca redes automáticamente ni calcula años faltantes.
+
+Salud es sólo manual y explícita (categoria=salud). Por protección conservadora se
+excluye la ficha ENTERA de IA/MCP/public, sin cambiar ia_permiso/ia_indexar ni otras
+ACL. Personal humano puede verla/editarla. No copiarla como evidencia ni conocimiento.
+No hay detector semántico automático: seleccionar categoría Salud para información
+sanitaria; no guardar salud en notas libres o bajo otra categoría. No hay permiso
+nuevo de compartir salud con IA en esta entrega. Esto evita prometer redacción
+selectiva segura en los endpoints legacy, que todavía devuelven Markdown completo.
+
+Validación ampliada: 49 pruebas API; Chromium incluye redes/cumpleaños sin año,
+preferencia y evento vencido; MCP verifica el envío de campos sin inventar el año.
+No requiere migración. Deploy/rollback coordinado siguen el procedimiento anterior;
+el código previo puede ignorar los campos nuevos: conservar el vault y no probar
+rollback de datos borrando esos campos.

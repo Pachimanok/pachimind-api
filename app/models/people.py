@@ -9,6 +9,36 @@ RelationType = Literal['participó en', 'mencionado en', 'trabaja con', 'vincula
 class Command(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
+class Birthday(Command):
+    mes: int = Field(ge=1, le=12)
+    dia: int = Field(ge=1, le=31)
+    anio: int | None = Field(default=None, ge=1900, le=2100)
+    @model_validator(mode='after')
+    def valid_date(self):
+        from datetime import date
+        date(self.anio or 2000, self.mes, self.dia)
+        return self
+
+class GeneralFact(Command):
+    texto: str = Field(min_length=1, max_length=2000)
+    categoria: Literal['interes', 'preferencia', 'familia', 'evento', 'salud', 'otro'] = 'otro'
+    fecha: str | None = None
+    vigente_hasta: str | None = None
+    estado: Literal['vigente', 'pendiente', 'finalizado'] = 'vigente'
+    @field_validator('fecha', 'vigente_hasta')
+    @classmethod
+    def exact_date(cls, value):
+        if value is not None:
+            from datetime import date
+            if date.fromisoformat(value).isoformat() != value:
+                raise ValueError('Usá fecha YYYY-MM-DD')
+        return value
+    @model_validator(mode='after')
+    def ordered_dates(self):
+        if self.fecha and self.vigente_hasta and self.vigente_hasta < self.fecha:
+            raise ValueError('Vigencia anterior a la fecha')
+        return self
+
 class PersonFields(Command):
     nombre: str | None = Field(default=None, min_length=1, max_length=200)
     aliases: list[str] | None = Field(default=None, max_length=30)
@@ -17,6 +47,18 @@ class PersonFields(Command):
     relacion_conmigo: str | None = Field(default=None, max_length=1000)
     ambitos: list[Ambito] | None = Field(default=None, max_length=4)
     contactos_profesionales: dict[Literal['email_profesional', 'telefono_profesional', 'perfil_profesional'], str] | None = None
+    redes_sociales: dict[Literal['linkedin', 'instagram', 'facebook', 'x', 'web', 'otra'], str] | None = None
+    cumpleanos: Birthday | None = None
+    datos_generales: list[GeneralFact] | None = Field(default=None, max_length=50)
+    @field_validator('redes_sociales')
+    @classmethod
+    def social_urls(cls, values):
+        from urllib.parse import urlparse
+        for value in (values or {}).values():
+            url = urlparse(value)
+            if len(value) > 500 or url.scheme != 'https' or not url.hostname or url.username or url.password or url.query or url.fragment or any(c.isspace() for c in value):
+                raise ValueError('Redes: URL HTTPS sin credenciales, parámetros ni fragmentos')
+        return values
     notas_manuales: str | None = Field(default=None, max_length=20000)
     tipo: Literal['persona', 'idea', 'recurso', 'nota'] | None = None
     @field_validator('nombre')

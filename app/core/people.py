@@ -109,6 +109,8 @@ def fields(n):
     values['organizacion'] = m.get('organizacion')  # A client association is not an organization/employer assertion.
     values['ambitos'] = n.metadata.ambitos if 'ambitos' in m else ({'Laboral': ['Trabajo'], 'Apostolado': ['Apostólico']}.get(m.get('area'), []))
     values['contactos_profesionales'] = m.get('contactos_profesionales') or {}
+    values['redes_sociales'] = m.get('redes_sociales') or {}
+    values['datos_generales'] = m.get('datos_generales') or []
     values['notas_manuales'] = m.get('notas_manuales')
     return values
 
@@ -189,7 +191,7 @@ def safe_evidence(items, scope, ai=False, expected=None):
     for item in items:
         value = item.model_dump(mode='json') if hasattr(item, 'model_dump') else dict(item)
         source = node(value['source_id'], scope, ai)
-        if source.metadata.sensibilidad in {'privado', 'sensible', 'secreto'}:
+        if source.metadata.sensibilidad in {'privado', 'sensible', 'secreto'} or any(f.get('categoria') == 'salud' for f in source.metadata.datos_generales):
             raise HTTPException(409, 'No copiar evidencia reservada a una ficha. Usá una referencia neutral y revisión específica.')
         data, post = raw(source)
         if value['quote'] not in post.content:
@@ -208,6 +210,24 @@ def proposal_visible(value, scope, ai):
     ids += [e['source_id'] for e in value.get('evidence', [])]
     ids += [link['target_id'] for link in value.get('links', [])]
     return all(vault_index.get(i) and visible(vault_index.get(i), scope, ai) for i in ids)
+
+
+def personal_context(values):
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo('America/Argentina/Mendoza')).date().isoformat()
+    result = []
+    for fact in values.get('datos_generales') or []:
+        state = fact.get('estado', 'vigente')
+        if state == 'finalizado':
+            status = 'finalizado'
+        elif fact.get('vigente_hasta') and fact['vigente_hasta'] < today:
+            status = 'vencido'
+        elif fact.get('fecha') and fact['fecha'] < today and fact.get('categoria') in {'evento', 'salud'}:
+            status = 'fecha_pasada_verificar'
+        else:
+            status = state
+        result.append({**fact, 'estado_actual': status, 'usar_como_hecho_actual': status == 'vigente'})
+    return result
 
 
 def profile(note_id, scope, ai=False):
@@ -251,6 +271,7 @@ def profile(note_id, scope, ai=False):
     elif re.search(r'\b(idea|manual|tutorial|guía)\b', n.title, re.I):
         warning = 'El título parece material de conocimiento. Proponer revisar tipo; no se reclasifica automáticamente.'
     return {'id': n.id, 'path': n.path, 'title': n.title, 'revision': revision(n), 'fields': values,
+            'personal_context': personal_context(values),
             'metadata': {k: getattr(n.metadata, k, None) for k in BASE_METADATA},
             'pending_fields': [key for key in PENDING_FIELDS if not values.get(key)], 'field_sources': sources,
             'relations': related, 'incoming_count': len(incoming), 'outgoing_count': len(outgoing),
@@ -452,6 +473,8 @@ def propose_person(note_id, body, scope, ai):
         changes = body.fields.model_dump(exclude_unset=True)
         if not changes and not body.questions:
             raise HTTPException(422, 'Propuesta vacía')
+        if any(f.get('categoria') == 'salud' for f in changes.get('datos_generales') or []):
+            raise HTTPException(403, 'Los datos de salud se registran sólo manualmente; no por propuestas ni MCP')
         no_credentials({'fields': changes, 'questions': body.questions})
         proof = safe_evidence(body.evidence, scope, ai)
         no_credentials(proof)
@@ -461,7 +484,13 @@ def propose_person(note_id, body, scope, ai):
             for key, value in changes.items():
                 if key in {'notas_manuales', 'tipo', 'ambitos'} or value is None:
                     continue  # Derived text/classification stays explicitly pending.
-                values = list(value.values()) if isinstance(value, dict) else value if isinstance(value, list) else [value]
+                def leaves(v):
+                    if isinstance(v, dict):
+                        return [x for item in v.values() for x in leaves(item)]
+                    if isinstance(v, list):
+                        return [x for item in v for x in leaves(item)]
+                    return [v]
+                values = leaves(value)
                 quotes = ' '.join(p['quote'] for p in proof if p['field'] == key)
                 if any(canonical(str(v)) not in canonical(quotes) for v in values if v):
                     raise HTTPException(422, 'No deduzcas datos personales: proponé sólo valores explícitos de la evidencia o una pregunta pendiente')
@@ -634,7 +663,7 @@ def knowledge(body, scope, ai):
                 node(source_id, scope, ai)
             return {**result, 'created': False}
         sources = [node(i, scope, ai) for i in body.source_ids]
-        if any(s.metadata.sensibilidad in {'privado', 'sensible', 'secreto'} for s in sources):
+        if any(s.metadata.sensibilidad in {'privado', 'sensible', 'secreto'} or any(f.get('categoria') == 'salud' for f in s.metadata.datos_generales) for s in sources):
             raise HTTPException(409, 'Fuente reservada: usar sólo referencia neutral a segmento, sin copiar contenido')
         relative = f'07 Conocimiento/{"Recursos" if body.kind == "lectura" else "Contexto"}/{readable_slug(body.title)}-{body.request_id}.md'
         if path_for(relative).exists():

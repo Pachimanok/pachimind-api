@@ -29,6 +29,12 @@ AI_BLOCKED_SENSIBILIDAD = {"sensible", "secreto", "privado"}
 def is_visible(note: NoteModel, scope: str, _seen=None) -> bool:
     if is_reserved_path(note.path):
         return False
+    # Personal health context is human-only. Hide the whole source to protect every
+    # legacy search/export surface, rather than redact just the new profile route.
+    if scope == 'public' and (note.metadata.cumpleanos or note.metadata.datos_generales or note.metadata.redes_sociales):
+        return False
+    if scope != 'personal' and any(f.get('categoria') == 'salud' for f in note.metadata.datos_generales):
+        return False
     rules = SCOPE_RULES.get(scope, SCOPE_RULES["public"])
     if note.metadata.sensibilidad in rules["blocked_sensibilidad"]:
         return False

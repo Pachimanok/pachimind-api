@@ -14,9 +14,12 @@ def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
 
         raw_meta = dict(post.metadata)
         content = post.content
-        for mapping in ('contactos_profesionales', 'datos_fuente'):
+        for mapping in ('contactos_profesionales', 'datos_fuente', 'redes_sociales'):
             if raw_meta.get(mapping) is None:
                 raw_meta[mapping] = {}
+
+        if raw_meta.get('datos_generales') is None:
+            raw_meta['datos_generales'] = []
 
         # Normalizar listas que pueden venir como string o tener elementos no-string (ej. 2024 como int)
         if "aliases" not in raw_meta and "alias" in raw_meta:

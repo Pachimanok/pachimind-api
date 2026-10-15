@@ -29,6 +29,9 @@ class NoteMetadata(BaseModel):
     funcion: str | None = None
     relacion_conmigo: str | None = None
     contactos_profesionales: dict[str, str] = {}
+    redes_sociales: dict[str, str] = {}
+    cumpleanos: dict | None = None
+    datos_generales: list[dict] = []
     notas_manuales: str | None = None
     ultima_revision: str | None = None
     datos_fuente: dict[str, list[dict]] = {}
