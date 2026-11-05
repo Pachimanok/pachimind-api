@@ -10,7 +10,8 @@ from app.core.id_utils import path_to_id, extract_title, extract_wikilinks, cont
 def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
     try:
         relative_path = str(file_path.relative_to(vault_root))
-        post = frontmatter.load(str(file_path))
+        raw = file_path.read_bytes()
+        post = frontmatter.loads(raw.decode("utf-8"))
 
         raw_meta = dict(post.metadata)
         content = post.content
@@ -46,6 +47,8 @@ def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
             if field in raw_meta and raw_meta[field] is not None:
                 raw_meta[field] = str(raw_meta[field])
 
+        from app.core.meeting_review import apply_documentary_review
+        raw_meta = apply_documentary_review(raw_meta, vault_root, path_to_id(relative_path), raw)
         metadata = NoteMetadata.model_validate(raw_meta)
 
         title = (str(raw_meta.get("titulo")) if raw_meta.get("titulo") else extract_title(content, file_path.name))

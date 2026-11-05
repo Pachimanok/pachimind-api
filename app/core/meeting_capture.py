@@ -134,8 +134,10 @@ def create_meeting(project_id, body):
 def get_meeting(project_id, meeting_id, for_ai=False):
     note,meta,content=source_for(project_id,meeting_id)
     if for_ai and not is_ai_eligible(note):raise HTTPException(403,'Esta reunión no permite uso por IA')
-    return {'id':note.id,'path':note.path,'title':meta['titulo'],'fecha':meta['fecha'],
-            'source':meta['fuente'],'participantes':meta['personas'],'content':content,
+    return {'id':note.id,'path':note.path,'title':meta['titulo'],'fecha':note.metadata.fecha,
+            'source':meta['fuente'],'participantes':note.metadata.personas,'content':content,
+            'participantes_originales':meta['personas'],'fecha_original':meta['fecha'],
+            'revision_documental':note.metadata.revision_documental,'revisado':note.metadata.revisado,
             'allow_ai':is_ai_eligible(note)}
 
 

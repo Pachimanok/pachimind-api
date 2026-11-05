@@ -178,7 +178,10 @@ def relation_rows(scope, ai=False):
 def revision(n):
     data, _ = raw(n)
     overlay = sorted([r for r in records('relations') if n.id in (r['source_id'], r['target_id'])], key=lambda r: r['id'])
-    return digest({'file': sha256(data).hexdigest(), 'relations': overlay})
+    state = {'file': sha256(data).hexdigest(), 'relations': overlay}
+    if n.metadata.revision_documental:
+        state['documentary_review'] = n.metadata.revision_documental
+    return digest(state)
 
 
 def require_revision(n, expected):

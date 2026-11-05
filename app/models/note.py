@@ -19,6 +19,7 @@ class NoteMetadata(BaseModel):
     ia_indexar: bool = True
     ia_editar: bool = False
     revisado: bool = False
+    revision_documental: dict | None = None
     tags: list[str] = []
     origen: str | None = None
     fuente_inmutable: bool = False
