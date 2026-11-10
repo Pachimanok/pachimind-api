@@ -1208,3 +1208,18 @@ revision para personas (428 si falta), para no eludir el control de concurrencia
 `GET /notes/{note_id}` incorpora revision. Stats/activity, enlaces y contexto respetan
 las exclusiones. El autolinker no edita revisados, fuentes inmutables, ia_editar=false
 ni las fichas/borradores administrados por esta portada. No se migra el vault al iniciar.
+
+## Auditoría de asociaciones (sólo lectura)
+
+`GET /vault/associations?view=orphans&q=&ambito=&page=1&per_page=20`
+
+Vistas: `orphans`, `no_general`, `unresolved`, `all`. Responde resumen del conjunto
+visible, ámbitos disponibles, resultados y total paginados. Huérfana significa sin
+conexiones visibles en ambos sentidos. Nodos generales: proyectos, personas,
+organizaciones y clientes, hasta dos pasos explícitos; no implica pertenencia.
+
+`GET /vault/associations/{note_id}` devuelve ámbito y conexiones con destinos,
+dirección, tipo, origen, referencias sin resolver y nodos generales con camino.
+No devuelve cuerpos. `ai_context` o actor `assistant` mantienen los controles IA.
+Las dos rutas requieren autenticación existente y deshabilitan caché. No escriben
+notas ni relaciones. Detalles y límites: `docs/note-associations.md`.
