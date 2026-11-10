@@ -197,19 +197,23 @@ def create_proposals(project_id,meeting_id,batch):
         return [proposal_result(relative) for relative,_ in pending]
 
 
-def review_proposal(project_id,meeting_id,proposal_id,action):
+def review_proposal(project_id,meeting_id,proposal_id,action,expected_revision=None,review_request_id=None):
     with transaction():
-        _,source_meta,original_content=source_for(project_id,meeting_id)
         proposal=vault_index.get(proposal_id)
-        if not proposal or not proposal.path.startswith('01 Inbox/Desde IA/propuesta-reunion-'):
+        if not proposal or not is_visible(proposal,'personal') or not proposal.path.startswith('01 Inbox/Desde IA/propuesta-reunion-'):
             raise HTTPException(404,'Propuesta no encontrada')
         meta,body=raw_note(proposal.path)
         if meta.get('meeting_id')!=meeting_id or meta.get('project_id')!=project_id:
             raise HTTPException(404,'Propuesta no encontrada')
         if meta.get('review'):
+            if expected_revision is not None and meta.get('human_review_request_id')!=review_request_id:
+                raise HTTPException(409,'La propuesta ya fue resuelta por otra revisión')
             if meta['review']!=action:raise HTTPException(409,'La propuesta ya fue resuelta')
             return proposal_result(proposal.path)
+        if expected_revision is not None and sha256(path_for(proposal.path).read_bytes()).hexdigest()!=expected_revision:
+            raise HTTPException(409,'La propuesta cambió. Releela antes de decidir.')
         if action=='approve':
+            _,source_meta,original_content=source_for(project_id,meeting_id)
             if meta.get('tipo') not in {'accion','decision'} or not meta.get('evidencia') or meta['evidencia'] not in original_content:
                 raise HTTPException(409,'La propuesta cambió o perdió su evidencia; revisala antes de aprobar')
             folder='09 Acciones/Capturas' if meta['tipo']=='accion' else '07 Conocimiento/Decisiones'
@@ -224,6 +228,10 @@ def review_proposal(project_id,meeting_id,proposal_id,action):
                 if existing.get('request_hash')!=meta['request_hash']:raise HTTPException(409,'Destino en conflicto')
             else:atomic_write(relative,serialize(approved,body))
             meta['approved_path']=relative
+        if action=='discard':
+            if not all(vault_index.get(i) and is_visible(vault_index.get(i),'personal') for i in (project_id,meeting_id)):
+                raise HTTPException(404,'Fuente o proyecto no disponible')
+        if review_request_id is not None:meta['human_review_request_id']=review_request_id
         meta.update({'estado':'archivado','review':action,'reviewed_at':datetime.now(timezone.utc).isoformat()})
         atomic_write(proposal.path,serialize(meta,body),replace=True)
         return proposal_result(proposal.path)

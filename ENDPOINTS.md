@@ -1211,15 +1211,43 @@ ni las fichas/borradores administrados por esta portada. No se migra el vault al
 
 ## Auditoría de asociaciones (sólo lectura)
 
-`GET /vault/associations?view=orphans&q=&ambito=&page=1&per_page=20`
+## GET /vault/associations
+
+Parámetros: view=orphans, q, ambito, page=1, per_page=20.
 
 Vistas: `orphans`, `no_general`, `unresolved`, `all`. Responde resumen del conjunto
 visible, ámbitos disponibles, resultados y total paginados. Huérfana significa sin
 conexiones visibles en ambos sentidos. Nodos generales: proyectos, personas,
 organizaciones y clientes, hasta dos pasos explícitos; no implica pertenencia.
 
-`GET /vault/associations/{note_id}` devuelve ámbito y conexiones con destinos,
+## GET /vault/associations/{note_id}
+
+Devuelve ámbito y conexiones con destinos,
 dirección, tipo, origen, referencias sin resolver y nodos generales con camino.
 No devuelve cuerpos. `ai_context` o actor `assistant` mantienen los controles IA.
 Las dos rutas requieren autenticación existente y deshabilitan caché. No escriben
 notas ni relaciones. Detalles y límites: `docs/note-associations.md`.
+
+## GET /human/summary
+
+Contadores de pendientes por clase; exige personal y actor manual. Sin caché.
+
+## GET /human/queue
+
+Filtros kind (all/links/person/meeting/note), q, page y per_page. Sólo metadatos
+para la cuenta humana; no devuelve cuerpos ni decide. Ver docs/human-review.md.
+
+## GET /human/items/{kind}/{item_id}
+
+Vista previa y comprobación de revisiones/evidencia; devuelve efecto y campos
+que deben autorizarse explícitamente. Una comprobación inválida informa el motivo.
+
+## POST /human/items/{kind}/{item_id}/decision
+
+request_id UUID, revision y decision approve/decline/answer. Aprobar exige
+exactamente authorized_fields mostrados. Respuestas a preguntas quedan separadas.
+Revalida antes de escribir y devuelve recibo verificado. No cambia permisos IA.
+
+## GET /human/requests/{request_id}
+
+Recupera resultado idempotente o estado prepared, revalidando visibilidad.
