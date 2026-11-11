@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
+from typing import Literal
 from app.core.vault_index import vault_index
 from app.middleware.auth import get_scope
 from app.middleware.permissions import is_visible
@@ -54,9 +55,9 @@ def todo_list(scope: str = Depends(get_scope)):
 
 
 @router.post('/todo', status_code=201)
-def todo_create(body: CreateTask, scope: str = Depends(get_scope)):
+def todo_create(body: CreateTask, scope: str = Depends(get_scope), actor: Literal['manual','assistant'] = Header('manual',alias='X-PachiMind-Actor')):
     personal(scope)
-    return create_task(body)
+    return create_task(body,ai=actor=='assistant')
 
 
 @router.patch('/todo/{note_id}')

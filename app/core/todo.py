@@ -7,7 +7,7 @@ import re
 import frontmatter
 import yaml
 from fastapi import HTTPException
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from app.core.meeting_capture import transaction, path_for, atomic_write, serialize, readable_slug, digest, project_for
 from app.core.vault_index import vault_index
 from app.core.id_utils import path_to_id
@@ -28,6 +28,13 @@ class CreateTask(BaseModel):
     responsable: str | None=Field(default=None,max_length=200)
     vencimiento: date | None=None
     prioridad: Priority='media'
+    source_decision_id: str | None=Field(default=None,min_length=1,max_length=300)
+    source_decision_revision: str | None=Field(default=None,pattern=r'^[a-f0-9]{64}$')
+    @model_validator(mode='after')
+    def decision_pair(self):
+        if bool(self.source_decision_id) != bool(self.source_decision_revision):
+            raise ValueError('La decisión y su revisión deben indicarse juntas')
+        return self
 
 class UpdateTask(BaseModel):
     model_config=ConfigDict(str_strip_whitespace=True,extra='forbid')
@@ -46,10 +53,15 @@ def task_note(note_id):
 
 def read_task(n):
     data=path_for(n.path).read_bytes();post=frontmatter.loads(data.decode());m=post.metadata
-    return {'id':n.id,'path':n.path,'title':n.title,'estado':m.get('estado') if m.get('estado') in ACTIVE-{'activo','inbox'} else 'pendiente',
+    result={'id':n.id,'path':n.path,'title':n.title,'estado':m.get('estado') if m.get('estado') in ACTIVE-{'activo','inbox'} else 'pendiente',
             'area':m.get('area'),'proyectos':n.metadata.proyectos,'responsable':str(m['responsable']) if m.get('responsable') else None,
             'vencimiento':str(m['vencimiento']) if m.get('vencimiento') else None,'prioridad':m.get('prioridad') or 'media',
             'fuente_ref':m.get('fuente_ref'),'revision':sha256(data).hexdigest()}
+    if m.get('source_decision_id'):
+        decision=vault_index.get(m['source_decision_id'])
+        result.update(source_decision_id=m['source_decision_id'],source_decision_ref=m.get('source_decision_ref'),
+                      source_decision_title=decision.title if decision else 'Decisión de origen')
+    return result
 
 def list_tasks():
     result=[]
@@ -58,25 +70,51 @@ def list_tasks():
             result.append(read_task(n))
     return sorted(result,key=lambda t:(t['estado']=='completado',t['vencimiento'] or '9999',{'alta':0,'media':1,'baja':2}.get(t['prioridad'],3),t['title']))
 
-def create_task(body):
+def create_task(body, ai=False):
     with transaction():
-        payload=body.model_dump(mode='json');fingerprint=digest(payload)
+        payload=body.model_dump(mode='json')
+        if not body.source_decision_id:
+            payload.pop('source_decision_id',None);payload.pop('source_decision_revision',None)
+        fingerprint=digest(payload)
         folder=path_for('09 Acciones/TODO');existing=list(folder.glob(f'*{body.request_id}.md')) if folder.exists() else []
         relative=str(existing[0].relative_to(path_for('.'))) if existing else f'09 Acciones/TODO/{readable_slug(body.title)}-{body.request_id}.md'
         if path_for(relative).exists():
             meta=frontmatter.load(str(path_for(relative))).metadata
             if meta.get('request_hash')!=fingerprint:raise HTTPException(409,'La actividad ya existe con otros datos')
             vault_index.rebuild_file(path_for(relative))
-            return read_task(task_note(path_to_id(relative)))
-        project=project_for(body.project_id) if body.project_id else None
-        allowed=not project or is_ai_eligible(project)
+            existing=task_note(path_to_id(relative))
+            if ai and body.source_decision_id and not is_ai_eligible(existing):raise HTTPException(403,'La actividad no está permitida para IA')
+            return read_task(existing)
+        decision=None;project_id=body.project_id
+        if body.source_decision_id:
+            from app.core import people
+            decision=people.node(body.source_decision_id,'personal',ai)
+            if decision.metadata.tipo!='decision' or decision.path.startswith('01 Inbox/') or decision.metadata.origen=='propuesta_reunion' or decision.metadata.estado in {'borrador','archivado','para_revisar','en_revision'}:
+                raise HTTPException(422,'Usá una decisión registrada, no una propuesta pendiente')
+            people.require_revision(decision,body.source_decision_revision)
+            decision_meta=frontmatter.loads(path_for(decision.path).read_text()).metadata
+            recorded_project=decision_meta.get('project_id')
+            if recorded_project:
+                if project_id and project_id!=recorded_project:raise HTTPException(422,'La actividad debe conservar el proyecto de la decisión')
+                project_id=recorded_project
+        project=project_for(project_id) if project_id else None
+        allowed=(not project or is_ai_eligible(project)) and (not decision or is_ai_eligible(decision))
+        sensitivity=project.metadata.sensibilidad if project else 'normal'
+        if decision:
+            order={'normal':0,'interno':1,'privado':2,'sensible':3,'secreto':4}
+            sensitivity=max([sensitivity,decision.metadata.sensibilidad],key=lambda v:order.get(v,4))
         meta={'titulo':body.title,'tipo':'accion','estado':'pendiente','area':project.metadata.area if project else body.area,
-              'proyectos':[f'[[{project.path.removesuffix(".md")}]]'] if project else [],'project_id':body.project_id,
+              'proyectos':[f'[[{project.path.removesuffix(".md")}]]'] if project else [],'project_id':project_id,
               'responsable':body.responsable,'vencimiento':body.vencimiento.isoformat() if body.vencimiento else None,
               'prioridad':body.prioridad,'fecha':date.today().isoformat(),'origen':'todo_manual','revisado':True,'ia_editar':False,
-              'sensibilidad':project.metadata.sensibilidad if project else 'normal','ia_permiso':'allow' if allowed else 'deny',
+              'sensibilidad':sensitivity,'ia_permiso':'allow' if allowed else 'deny',
               'ia_indexar':allowed,'request_hash':fingerprint}
-        atomic_write(relative,serialize(meta,f'# {body.title}\n\n{body.detalle}\n'))
+        content=f'# {body.title}\n\n{body.detalle}\n'
+        if decision:
+            meta.update(source_decision_id=decision.id,source_decision_ref=decision.path,fuente_ref=decision.path,
+                        fuentes_ids=[decision.id],datos_fuente={'decision_origen':[{'source_id':decision.id,'path':decision.path,'source_revision':body.source_decision_revision}]})
+            content+='\n## Decisión de origen\n\n[['+decision.path.removesuffix('.md')+']]\n'
+        atomic_write(relative,serialize(meta,content))
         return read_task(task_note(path_to_id(relative)))
 
 def update_task(note_id,body):

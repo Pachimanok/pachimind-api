@@ -42,3 +42,45 @@ class TodoTests(unittest.TestCase):
  def test_project_inherits_permissions_and_links(self):
   p=self.root/'05 Proyectos/p.md';p.parent.mkdir();p.write_text('---\ntipo: proyecto\nestado: activo\narea: Laboral\nia_permiso: deny\n---\n# Proyecto\n');vault_index.build(self.root)
   self.body['project_id']='05-proyectos-p';t=self.create();self.assertEqual(t['area'],'Laboral');self.assertEqual(t['proyectos'],['[[05 Proyectos/p]]']);self.assertIn('ia_permiso: deny',(self.root/t['path']).read_text())
+ def decision(self,restricted=False):
+  from app.core import meeting_capture as capture,people
+  from app.models.meetings import MeetingCreate,ProposalBatch,ProposalCreate
+  p=self.root/'05 Proyectos/proyecto.md';p.parent.mkdir(exist_ok=True);p.write_text('---\ntitulo: Proyecto Demo\ntipo: proyecto\nestado: activo\narea: Laboral\nia_permiso: allow\nia_indexar: true\nsensibilidad: normal\n---\n\n# Proyecto Demo');vault_index.rebuild_file(p)
+  m=capture.create_meeting('05-proyectos-proyecto',MeetingCreate(request_id=uuid4(),title='Reunión demo',fecha='2026-11-11',source='Fixture',content='Registrar acuerdo.'))
+  proposal=capture.create_proposals('05-proyectos-proyecto',m['id'],ProposalBatch(items=[ProposalCreate(request_id=uuid4(),tipo='decision',title='Acuerdo Demo',detalle='Mantener el acuerdo original.',evidencia='Registrar acuerdo.',responsable='Responsable registrado',vencimiento='2026-11-30')]))[0]
+  approved=capture.review_proposal('05-proyectos-proyecto',m['id'],proposal['id'],'approve')
+  from app.core.id_utils import path_to_id
+  note=vault_index.get(path_to_id(approved['approved_path']))
+  if restricted:
+   path=self.root/note.path;path.write_text(path.read_text().replace('ia_permiso: allow','ia_permiso: deny'));vault_index.rebuild_file(path);note=vault_index.get(note.id)
+  self.body.update(request_id=str(uuid4()),title='Ejecutar el acuerdo',responsable=None,vencimiento=None,project_id='05-proyectos-proyecto',source_decision_id=note.id,source_decision_revision=people.revision(note))
+  return note,proposal
+ def test_task_from_decision_preserves_original_and_only_creates_pending_activity(self):
+  note,_=self.decision();original=(self.root/note.path).read_bytes();t=self.create()
+  self.assertEqual(t['estado'],'pendiente');self.assertIsNone(t['responsable']);self.assertIsNone(t['vencimiento'])
+  self.assertEqual(t['source_decision_id'],note.id);self.assertEqual(t['source_decision_title'],'Acuerdo Demo');self.assertEqual(t['proyectos'],['[[05 Proyectos/proyecto]]'])
+  self.assertIn('[['+note.path.removesuffix('.md')+']]',(self.root/t['path']).read_text())
+  self.assertEqual((self.root/note.path).read_bytes(),original);self.assertEqual(self.create()['id'],t['id'])
+  self.assertEqual(len(list(self.root.glob('09 Acciones/TODO/*.md'))),1)
+ def test_task_from_decision_rejects_stale_source_proposals_and_wrong_project(self):
+  from app.core import people
+  note,proposal=self.decision();path=self.root/note.path;path.write_text(path.read_text()+'\nCambio');vault_index.rebuild_file(path)
+  self.assertEqual(self.c.post('/actions/todo',json=self.body).status_code,409)
+  self.body.update(source_decision_id=proposal['id'],source_decision_revision=people.revision(vault_index.get(proposal['id'])))
+  self.assertEqual(self.c.post('/actions/todo',json=self.body).status_code,422)
+  self.body.update(source_decision_id=note.id,source_decision_revision=people.revision(vault_index.get(note.id)),project_id='otro-proyecto')
+  self.assertEqual(self.c.post('/actions/todo',json=self.body).status_code,422)
+  self.assertEqual(list(self.root.glob('09 Acciones/TODO/*.md')),[])
+ def test_task_from_decision_inherits_privacy_and_assistant_cannot_read_restricted_source(self):
+  from app.middleware.permissions import is_ai_eligible
+  note,_=self.decision(True)
+  self.assertEqual(self.c.post('/actions/todo',json=self.body,headers={'X-PachiMind-Actor':'assistant'}).status_code,404)
+  t=self.create();self.assertFalse(is_ai_eligible(vault_index.get(t['id'])))
+  self.assertEqual(self.c.post('/actions/todo',json=self.body,headers={'X-PachiMind-Actor':'assistant'}).status_code,403)
+  path=self.root/note.path;path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
+  self.assertEqual(self.c.get('/actions/todo').json(),[])
+ def test_legacy_task_request_fingerprint_still_replays(self):
+  self.body['request_id']='11111111-1111-4111-8111-111111111111'
+  p=self.root/'09 Acciones/TODO/enviar-informe-11111111-1111-4111-8111-111111111111.md';p.parent.mkdir(parents=True)
+  p.write_text('---\ntitulo: Enviar informe\ntipo: accion\nestado: pendiente\nrequest_hash: 28e805cace4146052cbb0ccacd808664d9160c3d8e2c3f00b6e4269c05e875b0\n---\n\nContenido original\nsegunda línea')
+  vault_index.rebuild_file(p);before=p.read_bytes();self.create();self.assertEqual(p.read_bytes(),before)

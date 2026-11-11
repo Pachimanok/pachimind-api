@@ -1285,3 +1285,16 @@ resultado, la propuesta, la reunión y el proyecto. Devuelve destino canónico, 
 actual, proyecto y fuente. Los recibos de aprobación humana incluyen destination
 para abrir TODO/decisión/proyecto/reunión; se calcula también para recibos previos
 sin modificar los datos guardados. Un destino oculto no se divulga ni crea otro.
+
+### Actividad desde una decisión (POST /actions/todo)
+
+Campos opcionales emparejados source_decision_id y source_decision_revision.
+La decisión debe estar registrada y visible, fuera de propuestas/Inbox y estados
+borrador/archivado. Se valida su revisión; cambios producen 409. La tarea conserva
+su proyecto y agrega referencias a la decisión, sin reescribirla ni aprobarla.
+Responsable y vencimiento provienen sólo del formulario. Se heredan restricciones
+IA/sensibilidad del proyecto y de la decisión; datos_fuente mantiene dependencia de
+visibilidad. El actor assistant no puede usar una fuente no habilitada para IA.
+El request_id conserva idempotencia, incluso si la respuesta de creación se pierde;
+las creaciones anteriores sin estos campos siguen usando su fingerprint original.
+GET /actions/todo incluye source_decision_id/ref/title para las actividades derivadas.

@@ -132,3 +132,21 @@ proyecto y registro de aprobación reales; se preservan permisos e inmutabilidad
 La lista y todos sus accesos son sólo lectura. No extraen sugerencias ni aprueban en
 lote. Un recibo con respuesta perdida recupera el mismo resultado/destino existente.
 La publicación no ejecuta aprobaciones reales ni migra/reescribe notas antiguas.
+
+## Crear una actividad desde una decisión
+
+Los recibos y la lista de decisiones aprobadas ofrecen Crear tarea desde esta
+decisión. Abre el formulario editable de TODO; no crea nada al abrir. Guardar
+actividad crea una tarea pendiente con enlace a la decisión y al mismo proyecto.
+Responsable/fecha quedan vacíos salvo que el usuario los ingrese. La decisión
+original conserva sus bytes, estado y permisos; no se mueve ni se completa.
+
+El backend valida la revisión de la decisión y descarta propuestas/Inbox/archivadas.
+No reemplaza una revisión en conflicto para forzar la operación. Reintentar una
+respuesta perdida conserva request_id y devuelve la misma tarea. Se mantienen
+sensibilidad y restricciones del proyecto/fuente y la dependencia de visibilidad;
+no se copia el cuerpo de la decisión. TODO permite Ver decisión de origen.
+
+El contenedor de TODO ahora crece dentro del desplazamiento principal, evitando
+el recorte por flex/overflow:hidden. La prueba de navegador usa rueda y gestos
+táctiles reales con 35 filas y verifica acceso a los controles de la última tarea.

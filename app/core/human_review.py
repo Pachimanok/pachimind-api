@@ -439,6 +439,7 @@ def meeting_destination(note):
         from app.core.todo import ACTIVE
         todo = n.metadata.tipo == 'accion' and n.metadata.estado in ACTIVE and not n.metadata.fuente_inmutable
         return {**brief(n), 'view': 'todo' if todo else 'note', 'estado': n.metadata.estado,
+                'revision': people.revision(n), 'area': n.metadata.area or project.metadata.area,
                 'project': brief(project), 'source': brief(source), 'proposal_id': proposal.id,
                 'approved_at': str(old.get('reviewed_at') or ''),
                 'responsable': str(meta['responsable']) if meta.get('responsable') else None,
