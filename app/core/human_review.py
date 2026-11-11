@@ -1,5 +1,6 @@
 """Owner's human decision inbox. No automatic approvals or permission changes."""
 from collections import Counter
+from datetime import date
 from hashlib import sha256
 from uuid import UUID
 import re
@@ -58,6 +59,21 @@ def brief(n):
     return {'id': n.id, 'title': title(n), 'path': n.path, 'tipo': n.metadata.tipo}
 
 
+def meeting_context(value):
+    """Explicit provenance only; no bodies in the queue or inferred dates/relations."""
+    project = people.node(value['project_id'], 'personal')
+    source = people.node(value['meeting_id'], 'personal')
+    if not all(visible(n) for n in [project, source]):
+        raise HTTPException(404, 'Fuente o proyecto no disponible')
+    raw_date = source.metadata.fecha or ''
+    try:
+        meeting_date = date.fromisoformat(raw_date).isoformat() if re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw_date) else None
+    except ValueError:
+        meeting_date = None
+    return {'project': brief(project), 'source': brief(source), 'meeting_date': meeting_date,
+            'proposal_type': value.get('tipo')}
+
+
 def pending_note(n):
     return (visible(n) and (not n.metadata.revisado or n.metadata.estado in {'borrador', 'para_revisar', 'en_revision'}) and
             n.metadata.estado != 'archivado' and n.metadata.origen != 'propuesta_reunion')
@@ -105,6 +121,7 @@ def row(kind, n, value, item_id=None):
     labels = {'links': 'Vínculos', 'person': 'Ficha y aclaraciones', 'meeting': 'Propuesta de reunión', 'note': 'Revisión de nota'}
     return {'id': item_id, 'key': kind + ':' + item_id, 'kind': kind, 'category': labels[kind],
             'title': title(n), 'source': brief(n), 'state': 'pending',
+            **({'context': meeting_context(value)} if kind == 'meeting' else {}),
             'revision': version(kind, n, value),
             'created_at': str((value or {}).get('created_at') or (value or {}).get('fecha') or n.last_modified.isoformat()),
             'summary': (str(len(value.get('links', []))) + ' vínculos para revisar' if kind == 'links' else
@@ -154,7 +171,8 @@ def queue(kind='all', q='', page=1, per_page=20, hidden=False):
     counts = {k: counts[k] for k in ['links', 'person', 'meeting', 'note']}
     counts['note'] = len(notes) - hidden_count
     selected = [i for i in items if (kind == 'all' or i['kind'] == kind) and
-                (not q or people.canonical(q) in people.canonical(i['title'] + ' ' + i['source']['path']))]
+                (not q or people.canonical(q) in people.canonical(i['title'] + ' ' + i['source']['path'] + ' ' +
+                    ' '.join(i.get('context', {}).get(k, {}).get('title', '') for k in ['project', 'source'])))]
     optional = None
     if kind == 'note':
         selected_notes, digest = optional_snapshot(notes, preferences, q, hidden)
@@ -441,6 +459,7 @@ def meeting_destination(note):
         return {**brief(n), 'view': 'todo' if todo else 'note', 'estado': n.metadata.estado,
                 'revision': people.revision(n), 'area': n.metadata.area or project.metadata.area,
                 'project': brief(project), 'source': brief(source), 'proposal_id': proposal.id,
+                'context': meeting_context(meta),
                 'approved_at': str(old.get('reviewed_at') or ''),
                 'responsable': str(meta['responsable']) if meta.get('responsable') else None,
                 'vencimiento': str(meta['vencimiento']) if meta.get('vencimiento') else None}
@@ -464,7 +483,7 @@ def meeting_results(kind='all', q='', page=1, per_page=20):
         if kind != 'all' and n.metadata.tipo != kind:continue
         destination = meeting_destination(n)
         if not destination:continue
-        if q and people.canonical(q) not in people.canonical(destination['title'] + ' ' + destination['project']['title']):continue
+        if q and people.canonical(q) not in people.canonical(destination['title'] + ' ' + destination['project']['title'] + ' ' + destination['source']['title']):continue
         results.append(destination)
     results.sort(key=lambda n: (n['approved_at'], n['id']), reverse=True)
     start = (page - 1) * per_page

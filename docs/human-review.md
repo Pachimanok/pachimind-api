@@ -150,3 +150,16 @@ no se copia el cuerpo de la decisión. TODO permite Ver decisión de origen.
 El contenedor de TODO ahora crece dentro del desplazamiento principal, evitando
 el recorte por flex/overflow:hidden. La prueba de navegador usa rueda y gestos
 táctiles reales con 35 filas y verifica acceso a los controles de la última tarea.
+
+## Procedencia de decisiones
+
+Los elementos `meeting` de cola/detalle y los destinos aprobados incluyen
+`context`: `project`, `source` (id, título, ruta y tipo), `meeting_date` y
+`proposal_type`. La fecha sólo se toma de la propiedad fecha válida de la fuente;
+no se infiere del archivo ni de la aprobación. Se comprueba de nuevo la visibilidad
+de proyecto/fuente y sus dependencias. La búsqueda permite sus títulos además del
+texto que ya se buscaba. El catálogo no devuelve cuerpos ni citas: la evidencia
+literal continúa en el detalle de la propuesta y en los registros originales.
+
+Esta información es de lectura: no cambia revisiones, estados, ACL ni propuestas,
+no requiere migrar notas existentes y conserva las mismas autorizaciones humanas.

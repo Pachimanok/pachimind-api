@@ -383,3 +383,53 @@ class HumanReviewTests(unittest.TestCase):
         self.assertIsNone(replay.json()['destination']);self.assertNotIn('approved_path',replay.json()['result'])
         self.assertEqual(self.c.get('/human/meeting-results').json()['total'],0)
         self.assertEqual(len(list(self.root.glob('09 Acciones/Capturas/*.md'))),1)
+
+    def test_meeting_provenance_is_visible_before_deciding_and_searchable(self):
+        m=meeting.create_meeting(self.project,MeetingCreate(request_id=uuid4(),title='Análisis del origen',fecha='2026-10-09',source='Fixture',content='Texto original reservado para el detalle. Confirmar alcance.'))
+        proposal=meeting.create_proposals(self.project,m['id'],ProposalBatch(items=[ProposalCreate(request_id=uuid4(),tipo='decision',title='Alcance',detalle='Confirmar alcance',evidencia='Confirmar alcance.')]))[0]
+        before={p:p.read_bytes() for p in self.root.rglob('*.md')}
+        queue=self.c.get('/human/queue?kind=meeting').json()
+        item=queue['results'][0];context=item['context']
+        self.assertEqual(context['project']['id'],self.project)
+        self.assertEqual(context['source']['id'],m['id'])
+        self.assertEqual(context['source']['title'],'Análisis del origen')
+        self.assertEqual(context['meeting_date'],'2026-10-09')
+        self.assertEqual(context['proposal_type'],'decision')
+        self.assertNotIn('Texto original reservado',json.dumps(queue))
+        self.assertNotIn('evidencia',json.dumps(queue))
+        detail=self.detail('meeting',proposal['id'])
+        self.assertEqual(detail['context'],context)
+        self.assertEqual(detail['proposal']['evidencia'],'Confirmar alcance.')
+        for q in ['Proyecto Demo','Análisis del origen']:
+            self.assertEqual(self.c.get('/human/queue',params={'q':q}).json()['results'][0]['id'],proposal['id'])
+        self.assertEqual(before,{p:p.read_bytes() for p in self.root.rglob('*.md')})
+        self.assertEqual(people.records('human_history'),[])
+        self.assertEqual(list(self.root.glob('07 Conocimiento/Decisiones/*.md')),[])
+        path=meeting.path_for(m['path']);path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
+        hidden=self.c.get('/human/queue?kind=meeting')
+        self.assertEqual(hidden.json()['total'],0);self.assertNotIn('Análisis del origen',hidden.text)
+        self.assertEqual(self.c.get('/human/items/meeting/'+proposal['id']).status_code,404)
+
+    def test_approved_provenance_has_no_bulk_body_and_uses_meeting_date(self):
+        m,p,receipt,body=self.approved_fixture('decision')
+        context=receipt['destination']['context']
+        self.assertEqual(context['source']['id'],m['id'])
+        self.assertEqual(context['project']['id'],self.project)
+        self.assertEqual(context['meeting_date'],'2026-11-11')
+        catalog=self.c.get('/human/meeting-results',params={'q':context['source']['title']}).json()
+        self.assertEqual(catalog['total'],1)
+        self.assertEqual(catalog['results'][0]['context'],context)
+        self.assertNotIn('content',catalog['results'][0]);self.assertNotIn('evidencia',json.dumps(context))
+        self.assertEqual(self.c.get('/human/requests/'+body['request_id']).json()['destination']['context'],context)
+
+    def test_context_never_infers_a_date_from_filename_or_approval(self):
+        m,p,receipt,body=self.approved_fixture('decision')
+        path=meeting.path_for(m['path']);original=path.read_text()
+        for value in [None,'2026-99-99','2026','2026-01-01T01:00:00']:
+            meta,content=meeting.raw_note(m['path'])
+            if value is None:meta.pop('fecha',None)
+            else:meta['fecha']=value
+            path.write_text(meeting.serialize(meta,content));vault_index.rebuild_file(path)
+            context=self.c.get('/human/meeting-results').json()['results'][0]['context']
+            self.assertIsNone(context['meeting_date'])
+        path.write_text(original);vault_index.rebuild_file(path)
