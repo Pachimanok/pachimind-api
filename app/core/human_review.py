@@ -12,6 +12,7 @@ from app.core.human_note_review import review_path
 from app.models.people import ReviewCommand, LinkCommand
 
 Kind = Literal['links', 'person', 'meeting', 'note']
+OPTIONAL_VISIBILITY_KEY = sha256(b'owner-optional-review-visibility-v1').hexdigest()
 
 
 class RefreshLinks(BaseModel):
@@ -19,6 +20,14 @@ class RefreshLinks(BaseModel):
     request_id: UUID
     revision: str = Field(pattern=r'^[a-f0-9]{64}$')
     current_revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+
+
+class OptionalVisibility(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    action: Literal['hide', 'restore']
+    q: str = Field(default='', max_length=200)
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
 class Decision(BaseModel):
@@ -105,8 +114,26 @@ def row(kind, n, value, item_id=None):
                         'Revisar el contenido; conservar texto, ubicación y permisos')}
 
 
-def queue(kind='all', q='', page=1, per_page=20):
-    items = []
+def optional_preferences():
+    path = capture.path_for(people.record_path('optional_visibility', OPTIONAL_VISIBILITY_KEY))
+    return people.load('optional_visibility', OPTIONAL_VISIBILITY_KEY) if path.exists() else {'generation': 0, 'notes': {}, 'receipts': {}}
+
+
+def optional_hidden(n, preferences):
+    return preferences.get('notes', {}).get(n.id, {}).get('revision') == version('note', n, None)
+
+
+def optional_snapshot(notes, preferences, q, hidden):
+    selected = [n for n in notes if optional_hidden(n, preferences) == hidden and
+                (not q or people.canonical(q) in people.canonical(title(n) + ' ' + n.path))]
+    digest = capture.digest({'generation': preferences['generation'], 'query': q, 'hidden': hidden,
+                             'notes': sorted((n.id, version('note', n, None)) for n in selected)})
+    return selected, digest
+
+
+def queue(kind='all', q='', page=1, per_page=20, hidden=False):
+    items = []; notes = []
+    preferences = optional_preferences()
     for value in people.records('changes'):
         if value.get('state') != 'pending' or value.get('kind') not in {'links', 'person'}:continue
         try:
@@ -120,15 +147,55 @@ def queue(kind='all', q='', page=1, per_page=20):
                 n, value = load('meeting', candidate.id)
                 if is_pending('meeting', n, value):items.append(row('meeting', n, value))
             except HTTPException:continue
-        elif pending_note(candidate):items.append(row('note', candidate, None))
+        elif pending_note(candidate):notes.append(candidate)
+    hidden_count = sum(optional_hidden(n, preferences) for n in notes)
     counts = Counter(item['kind'] for item in items)
     counts = {k: counts[k] for k in ['links', 'person', 'meeting', 'note']}
-    selected = [i for i in items if ((kind == 'all' and i['kind'] != 'note') or i['kind'] == kind) and
+    counts['note'] = len(notes) - hidden_count
+    selected = [i for i in items if (kind == 'all' or i['kind'] == kind) and
                 (not q or people.canonical(q) in people.canonical(i['title'] + ' ' + i['source']['path']))]
+    optional = None
+    if kind == 'note':
+        selected_notes, digest = optional_snapshot(notes, preferences, q, hidden)
+        selected = [row('note', n, None) for n in selected_notes]
+        optional = {'hidden': hidden, 'hidden_count': hidden_count, 'visible_count': counts['note'],
+                    'selection_count': len(selected), 'selection_revision': digest, 'query': q}
     selected.sort(key=lambda i: (i['created_at'], i['key']), reverse=True)
     start = (page - 1) * per_page
-    return {'total': len(selected), 'total_pending': sum(v for k, v in counts.items() if k != 'note'), 'counts': counts, 'page': page,
-            'per_page': per_page, 'results': selected[start:start + per_page]}
+    return {'total': len(selected), 'total_pending': sum(v for k, v in counts.items() if k != 'note'),
+            'counts': counts, 'page': page, 'per_page': per_page, 'results': selected[start:start + per_page],
+            'optional': optional}
+
+
+def optional_visibility(command):
+    """Dismiss/restore optional notices; never review, archive or rewrite notes."""
+    fingerprint = capture.digest(command.model_dump(mode='json'))
+    key = str(command.request_id)
+    with capture.transaction():
+        preferences = optional_preferences()
+        previous = preferences.get('receipts', {}).get(key)
+        if previous:
+            if previous['fingerprint'] != fingerprint:raise HTTPException(409, 'Este identificador ya corresponde a otra operación.')
+            return previous['result']
+        # Refresh only indexed notes so external edits cannot be hidden by an old snapshot.
+        notes = []
+        for candidate in vault_index.all():
+            if not pending_note(candidate):continue
+            try:n = people.node(candidate.id, 'personal')
+            except HTTPException:continue
+            if pending_note(n):notes.append(n)
+        selected, revision = optional_snapshot(notes, preferences, command.q, command.action == 'restore')
+        if revision != command.revision:
+            raise HTTPException(409, 'La lista cambió. Aplicá la búsqueda o actualizá antes de limpiar los avisos.')
+        for n in selected:
+            if command.action == 'hide':preferences['notes'][n.id] = {'revision': version('note', n, None), 'request_id': key}
+            else:preferences['notes'].pop(n.id, None)
+        result = {'request_id': key, 'action': command.action, 'affected': len(selected), 'verified': True}
+        preferences['generation'] += 1
+        preferences.setdefault('receipts', {})[key] = {'fingerprint': fingerprint, 'result': result}
+        # One atomic sidecar commits both visibility preferences and idempotent receipt.
+        people.save('optional_visibility', OPTIONAL_VISIBILITY_KEY, preferences)
+        return result
 
 
 def validation(kind, n, value):

@@ -87,3 +87,27 @@ prepara el pendiente. Nunca llama a la operación de aprobación.
 Esta entrega reemplaza sólo human_review.py, routers/human.py y los assets web
 index.html/human.js/human.css/server.cjs. Reinicia API y Node; conserva MCP/OAuth.
 La reversión de código conserva las propuestas y su historial, sin restaurar vault.
+
+## Limpiar avisos sin revisar
+
+En Revisión opcional, Limpiar avisos sin revisar oculta los avisos del resultado
+actual de búsqueda, en todas sus páginas. Con búsqueda vacía abarca todos los avisos
+opcionales visibles. Ver avisos ocultos y Volver a mostrar avisos revierten esa
+preferencia, con el mismo alcance de filtro. No hay que abrir ni releer cada nota.
+
+La limpieza nunca escribe Markdown ni revision_humana. Conserva revisado, estado,
+IA, fuente inmutable, relaciones y propuestas pendientes. Al cambiar los bytes o
+la revisión efectiva de una nota reaparece su aviso. No es una aprobación global,
+una integración automática ni un archivo/borrado. Los avisos ocultos siguen
+accesibles explícitamente para el propietario y no cuentan en la pestaña activa.
+
+Se guarda .pachimind/optional_visibility/<hash interno>.json con IDs/revisiones y
+recibos, sin cuerpos de notas. La selección paginada lleva un snapshot de todos los
+resultados y una generación; cambios posteriores producen 409. Un único reemplazo
+atómico persiste preferencias y recibo, para recuperar respuestas perdidas sin
+repetir acciones. Las rutas requieren sesión humana/personal; no se agrega MCP.
+
+Entrega de human_review.py, routers/human.py y assets web index/human.js/css y
+server.cjs; reinicia API/Node sin cambios MCP/OAuth. La reversión conserva el
+sidecar: el código previo vuelve a mostrar avisos porque ignora la preferencia,
+pero no altera contenidos/estados/permisos. Nunca restaurar el vault completo.

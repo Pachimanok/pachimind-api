@@ -1265,3 +1265,13 @@ La cola /human/queue por defecto y total_pending del resumen cuentan decisiones
 (vínculos, fichas/preguntas, propuestas de reuniones). Las notas sin revisar se
 consultan expresamente con kind=note como revisión opcional y cuentan en
 counts.note, sin sumarse al contador principal ni cambiar sus estados/permisos.
+
+## POST /human/optional-notes/visibility
+
+Scope personal y actor manual. request_id UUID, action hide/restore, q opcional y
+revision de la selección obtenida en GET /human/queue?kind=note. Oculta o restaura
+sólo avisos de revisión opcional de esa búsqueda, incluidas todas sus páginas.
+No revisa, aprueba, archiva ni edita notas. Un sidecar de preferencias y recibos
+se escribe atómicamente; los reintentos conservan request_id. Un cambio de la lista
+produce 409. El GET acepta hidden=true para ver los avisos ocultos; optional incluye
+conteos y selection_revision. Al cambiar la versión de una nota, su aviso reaparece.

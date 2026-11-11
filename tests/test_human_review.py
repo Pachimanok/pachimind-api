@@ -258,3 +258,79 @@ class HumanReviewTests(unittest.TestCase):
         result=human.refresh_links(item,command);self.assertTrue(result['verified'])
         self.assertEqual(len(people.records('changes')),2);self.assertEqual(self.c.get('/human/queue?kind=links').json()['total'],1)
         self.assertEqual(people.records('relations'),[])
+
+    def optional_command(self, action='hide', q='', request=None, snapshot=None):
+        view=snapshot or self.c.get('/human/queue',params={'kind':'note','q':q,'hidden':action=='restore'}).json()
+        body=dict(request_id=request or str(uuid4()),action=action,q=q,revision=view['optional']['selection_revision'])
+        return self.c.post('/human/optional-notes/visibility',json=body),body
+    def test_optional_cleanup_hides_all_pages_without_review_or_note_changes(self):
+        ids=[self.note('07 Conocimiento/optional-'+str(i),'Aviso '+str(i),revisado=False,ia_indexar=False) for i in range(18)]
+        before={p:p.read_bytes() for p in self.root.rglob('*.md')}
+        view=self.c.get('/human/queue?kind=note&per_page=5').json();self.assertEqual(len(view['results']),5)
+        response,_=self.optional_command(snapshot=view);self.assertEqual(response.status_code,200,response.text);self.assertEqual(response.json()['affected'],18)
+        self.assertEqual(before,{p:p.read_bytes() for p in self.root.rglob('*.md')})
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],0)
+        self.assertEqual(self.c.get('/human/queue?kind=note&hidden=true').json()['total'],18)
+        for i in ids:
+            n=vault_index.get(i);self.assertFalse(n.metadata.revisado);self.assertFalse(n.metadata.ia_indexar);self.assertEqual(n.metadata.estado,'activo')
+        self.assertEqual(people.records('human_history'),[]);self.assertEqual(people.records('human_notes'),[])
+    def test_optional_cleanup_filter_and_restore_preserve_other_notices(self):
+        for title in ['Grupo A Uno','Grupo A Dos','Grupo B Uno']:
+            self.note('07 Conocimiento/'+title,title,revisado=False)
+        r,_=self.optional_command(q='Grupo A');self.assertEqual(r.json()['affected'],2)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],1)
+        r,_=self.optional_command('restore',q='Grupo A Uno');self.assertEqual(r.json()['affected'],1)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],2)
+        hidden=self.c.get('/human/queue?kind=note&hidden=true').json();self.assertEqual(hidden['total'],1);self.assertEqual(hidden['results'][0]['title'],'Grupo A Dos')
+    def test_hidden_optional_notice_reappears_after_source_changes(self):
+        item=self.note('07 Conocimiento/changed','Fuente modificable',revisado=False,fuente_inmutable=True)
+        r,_=self.optional_command();self.assertEqual(r.json()['affected'],1)
+        path=meeting.path_for(vault_index.get(item).path);path.write_bytes(path.read_bytes()+b'\nActualizacion');vault_index.rebuild_file(path)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],1)
+        self.assertEqual(self.c.get('/human/queue?kind=note&hidden=true').json()['total'],0)
+        self.assertFalse(vault_index.get(item).metadata.revisado)
+    def test_optional_cleanup_rejects_stale_selection_and_hidden_scope(self):
+        self.note('07 Conocimiento/first','Aviso uno',revisado=False)
+        snapshot=self.c.get('/human/queue?kind=note').json()
+        self.note('07 Conocimiento/second','Aviso dos',revisado=False)
+        r,_=self.optional_command(snapshot=snapshot);self.assertEqual(r.status_code,409)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],2)
+        for scope in ['ai_context','public']:
+            self.scope=scope;r,_=self.optional_command(snapshot=snapshot);self.assertEqual(r.status_code,403)
+        self.scope='personal'
+        body=dict(request_id=str(uuid4()),action='hide',q='',revision=snapshot['optional']['selection_revision'])
+        self.assertEqual(self.c.post('/human/optional-notes/visibility',json=body,headers={'X-PachiMind-Actor':'assistant'}).status_code,403)
+    def test_optional_cleanup_replay_never_rehides_restored_items(self):
+        self.note('07 Conocimiento/replay','Aviso',revisado=False)
+        first,body=self.optional_command();self.assertEqual(first.status_code,200)
+        self.assertEqual(self.c.post('/human/optional-notes/visibility',json=body).json(),first.json())
+        restored,_=self.optional_command('restore');self.assertEqual(restored.json()['affected'],1)
+        self.c.post('/human/optional-notes/visibility',json=body)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],1)
+        altered={**body,'action':'restore'};self.assertEqual(self.c.post('/human/optional-notes/visibility',json=altered).status_code,409)
+    def test_optional_cleanup_leaves_pending_links_and_decisions_intact(self):
+        self.note('07 Conocimiento/other','Aviso',revisado=False)
+        link=self.pending_link();person=self.person_proposal()
+        before=self.c.get('/human/summary').json()['total_pending']
+        self.optional_command()
+        self.assertEqual(self.c.get('/human/summary').json()['total_pending'],before)
+        self.assertTrue(self.detail('links',link)['validation']['ok']);self.assertTrue(self.detail('person',person)['validation']['ok'])
+        self.assertEqual(people.load('changes',link)['state'],'pending');self.assertEqual(people.records('relations'),[])
+    def test_optional_cleanup_receipt_survives_lost_response_after_atomic_write(self):
+        from unittest.mock import patch
+        self.note('07 Conocimiento/atomic','Aviso',revisado=False)
+        snapshot=self.c.get('/human/queue?kind=note').json()
+        command=human.OptionalVisibility(request_id=uuid4(),action='hide',revision=snapshot['optional']['selection_revision'])
+        save=people.save
+        def response_lost(*args,**kwargs):
+            save(*args,**kwargs);raise OSError('Synthetic response lost')
+        with patch.object(people,'save',side_effect=response_lost):
+            with self.assertRaises(OSError):human.optional_visibility(command)
+        result=human.optional_visibility(command);self.assertEqual(result['affected'],1);self.assertTrue(result['verified'])
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],0)
+    def test_hidden_optional_notices_do_not_leak_newly_restricted_sources(self):
+        item=self.note('07 Conocimiento/private','NO MOSTRAR',revisado=False)
+        self.optional_command()
+        path=meeting.path_for(vault_index.get(item).path);path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
+        response=self.c.get('/human/queue?kind=note&hidden=true')
+        self.assertNotIn('NO MOSTRAR',response.text);self.assertNotIn(item,response.text);self.assertEqual(response.json()['total'],0)

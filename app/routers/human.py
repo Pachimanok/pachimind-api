@@ -21,9 +21,9 @@ def summary(response: Response):
 
 @router.get('/queue', dependencies=[Depends(owner)])
 def queue(response: Response, kind: Literal['all', 'links', 'person', 'meeting', 'note'] = 'all',
-          q: str = Query('', max_length=200), page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100)):
+          q: str = Query('', max_length=200), page: int = Query(1, ge=1), per_page: int = Query(20, ge=1, le=100), hidden: bool = False):
     response.headers['Cache-Control'] = 'no-store'
-    return human.queue(kind, q, page, per_page)
+    return human.queue(kind, q, page, per_page, hidden)
 
 
 @router.get('/items/{kind}/{item_id}', dependencies=[Depends(owner)])
@@ -48,3 +48,9 @@ def receipt(request_id: UUID, response: Response):
 def refresh_links(item_id: str, command: human.RefreshLinks, response: Response):
     response.headers['Cache-Control'] = 'no-store'
     return human.refresh_links(item_id, command)
+
+
+@router.post('/optional-notes/visibility', dependencies=[Depends(owner)])
+def optional_visibility(command: human.OptionalVisibility, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    return human.optional_visibility(command)
