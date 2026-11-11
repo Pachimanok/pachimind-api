@@ -61,3 +61,29 @@ los módulos nuevos si coinciden con los hashes instalados; reinicia API y Node.
 Conservar sidecars e historial: no restaurar el vault encima de decisiones nuevas.
 El código anterior no muestra las revisiones humanas, pero sus registros quedan
 conservados para volver a habilitar esta versión.
+
+## Ajuste del 11/11: decisiones concretas y propuestas desactualizadas
+
+La vista principal y su badge cuentan sólo vínculos, fichas/aclaraciones y
+propuestas de reuniones. Tener revisado=false no impone releer toda nota. La
+revisión completa permanece accesible expresamente en Revisión opcional
+(kind=note); no se marca nada aprobado ni se habilita IA para quitarlo de la cola.
+
+Cuando hay conflicto, la lectura calcula una vista previa con los mismos IDs,
+tipos de relación, acciones y citas, usando revisiones actuales. Actualizar
+propuesta, sin aplicar es una escritura separada que crea otro pendiente y
+conserva el anterior como superseded. Exige el hash de ambas vistas, evidencia
+literal y destinos compatibles/visibles. No modifica Markdown, revisión documental,
+permisos, ni relaciones. Luego debe autorizarse/aprobarse la propuesta nueva.
+No se reintenta una aprobación con una revisión distinta ni se amplía su alcance.
+
+La creación es idempotente por request_id; si se pierde la respuesta puede
+reintentarse el mismo identificador. El par anterior/nuevo se guarda bajo el
+bloqueo compartido; un reintento completa una interrupción sin crear más borradores.
+El helper de mantenimiento puede regenerar una propuesta explícitamente solicitada
+con ai=True: conserva los controles de visibilidad/evidencia del asistente y sólo
+prepara el pendiente. Nunca llama a la operación de aprobación.
+
+Esta entrega reemplaza sólo human_review.py, routers/human.py y los assets web
+index.html/human.js/human.css/server.cjs. Reinicia API y Node; conserva MCP/OAuth.
+La reversión de código conserva las propuestas y su historial, sin restaurar vault.

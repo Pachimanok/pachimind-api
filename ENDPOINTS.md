@@ -1251,3 +1251,17 @@ Revalida antes de escribir y devuelve recibo verificado. No cambia permisos IA.
 ## GET /human/requests/{request_id}
 
 Recupera resultado idempotente o estado prepared, revalidando visibilidad.
+
+## POST /human/items/links/{item_id}/refresh
+
+Scope personal y actor manual. request_id, revision de la propuesta y
+current_revision de la vista previa. Crea una propuesta nueva con los mismos
+vínculos/evidencias, revisiones actuales y referencia a la anterior. La anterior
+queda superseded; ninguna relación se aplica. Reintentos conservan request_id.
+Si fuente, evidencia, destino o propuesta cambian después de la vista previa,
+rechaza la actualización. Las evidencias deben seguir siendo citas literales.
+
+La cola /human/queue por defecto y total_pending del resumen cuentan decisiones
+(vínculos, fichas/preguntas, propuestas de reuniones). Las notas sin revisar se
+consultan expresamente con kind=note como revisión opcional y cuentan en
+counts.note, sin sumarse al contador principal ni cambiar sus estados/permisos.

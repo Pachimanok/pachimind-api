@@ -153,10 +153,10 @@ class HumanReviewTests(unittest.TestCase):
         self.assertEqual(r.status_code,200,r.text)
     def test_pagination_and_filter_counts_and_no_automatic_decisions(self):
         for i in range(18):self.note('07 Conocimiento/n'+str(i),'Pendiente '+str(i),revisado=False)
-        one=self.c.get('/human/queue?per_page=10').json();two=self.c.get('/human/queue?per_page=10&page=2').json()
+        one=self.c.get('/human/queue?kind=note&per_page=10').json();two=self.c.get('/human/queue?kind=note&per_page=10&page=2').json()
         self.assertEqual(len(one['results'])+len(two['results']),18)
-        self.assertEqual(one['total_pending'],18)
-        self.assertEqual(self.c.get('/human/queue?q=Pendiente+17').json()['total'],1)
+        self.assertEqual(one['total_pending'],0)
+        self.assertEqual(self.c.get('/human/queue?kind=note&q=Pendiente+17').json()['total'],1)
         self.assertEqual(people.records('human_history'),[])
 
     def test_note_without_explicit_state_keeps_default_after_review(self):
@@ -170,3 +170,91 @@ class HumanReviewTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(),before)
         self.assertEqual(vault_index.get(note).metadata.estado,'activo')
         self.assertTrue(vault_index.get(note).metadata.revisado)
+
+    def stale_with_evidence(self):
+        cmd=LinkCommand(request_id=uuid4(),source_id=self.source,revision=people.revision(vault_index.get(self.source)),links=[dict(
+            target_id=self.project,target_revision=people.revision(vault_index.get(self.project)),relation='relacionado con',
+            evidence=dict(field='relation',source_id=self.source,quote='Organización Demo.'))])
+        item=people.propose_links(cmd,'personal',True)['id']
+        p=meeting.path_for(vault_index.get(self.project).path);p.write_text(p.read_text()+'\nOtra relación documental.');vault_index.rebuild_file(p)
+        return item
+    def refresh(self,item,detail=None,request=None):
+        d=detail or self.detail('links',item)
+        body=dict(request_id=request or str(uuid4()),revision=d['revision'],current_revision=d['refresh']['revision'])
+        return self.c.post('/human/items/links/'+item+'/refresh',json=body),body
+    def test_optional_content_review_not_in_decision_queue_or_badge(self):
+        self.note('07 Conocimiento/optional','Fuente sin revisar','Original intacto',revisado=False,estado='borrador')
+        q=self.c.get('/human/queue').json();self.assertEqual(q['total'],0);self.assertEqual(q['total_pending'],0)
+        self.assertEqual(q['counts']['note'],1)
+        self.assertEqual(self.c.get('/human/queue?kind=note').json()['total'],1)
+        self.assertEqual(self.c.get('/human/summary').json()['total_pending'],0)
+    def test_refresh_stale_links_stays_pending_preserves_intent_and_requires_new_approval(self):
+        item=self.stale_with_evidence();old=self.detail('links',item);self.assertFalse(old['validation']['ok'])
+        self.assertTrue(old['refresh']['available']);self.assertEqual(len(old['refresh']['changed_targets']),1)
+        before={p:p.read_bytes() for p in self.root.rglob('*.md')}
+        response,body=self.refresh(item,old);self.assertEqual(response.status_code,200,response.text)
+        new_id=response.json()['id'];self.assertNotEqual(new_id,item)
+        new=self.detail('links',new_id);self.assertTrue(new['validation']['ok'])
+        self.assertEqual([(l['target_id'],l['relation'],l['action']) for l in new['links']],[(l['target_id'],l['relation'],l['action']) for l in old['links']])
+        self.assertEqual(people.load('changes',item)['state'],'superseded')
+        self.assertEqual(people.load('changes',new_id)['state'],'pending');self.assertEqual(people.records('relations'),[])
+        self.assertEqual(before,{p:p.read_bytes() for p in self.root.rglob('*.md')})
+        again=self.c.post('/human/items/links/'+item+'/refresh',json=body);self.assertEqual(again.json(),response.json())
+        self.assertEqual(self.c.get('/human/queue?kind=links').json()['total'],1)
+        approved,_=self.decision('links',new_id,detail=new);self.assertEqual(approved.status_code,200,approved.text)
+        self.assertEqual(len(people.records('relations')),1)
+    def test_refresh_snapshot_conflict_or_changed_evidence_does_not_replace_proposal(self):
+        item=self.stale_with_evidence();d=self.detail('links',item)
+        path=meeting.path_for(vault_index.get(self.project).path);path.write_text(path.read_text()+'\nNuevo cambio.');vault_index.rebuild_file(path)
+        response,_=self.refresh(item,d);self.assertEqual(response.status_code,409)
+        self.assertEqual(people.load('changes',item)['state'],'pending')
+        source=meeting.path_for(vault_index.get(self.source).path);source.write_text(source.read_text().replace('Organización Demo.','Texto corregido.'));vault_index.rebuild_file(source)
+        current=self.detail('links',item);self.assertFalse(current['refresh']['available'])
+        self.assertEqual(len(people.records('changes')),1);self.assertEqual(people.records('relations'),[])
+    def test_refresh_keeps_scope_and_decline_afterwards(self):
+        item=self.stale_with_evidence();d=self.detail('links',item)
+        for scope in ['ai_context','public']:
+            self.scope=scope;r,_=self.refresh(item,d);self.assertEqual(r.status_code,403)
+        self.scope='personal'
+        r=self.c.post('/human/items/links/'+item+'/refresh',headers={'X-PachiMind-Actor':'assistant'},json=dict(request_id=str(uuid4()),revision=d['revision'],current_revision=d['refresh']['revision']))
+        self.assertEqual(r.status_code,403)
+        r,_=self.refresh(item,d);new=r.json()['id'];declined,_=self.decision('links',new,'decline')
+        self.assertEqual(declined.status_code,200);self.assertEqual(people.records('relations'),[])
+    def test_assistant_refresh_creates_only_pending_with_original_protections(self):
+        item=self.stale_with_evidence();d=self.detail('links',item)
+        command=human.RefreshLinks(request_id=uuid4(),revision=d['revision'],current_revision=d['refresh']['revision'])
+        result=human.refresh_links(item,command,ai=True)
+        self.assertEqual(people.load('changes',result['id'])['state'],'pending');self.assertEqual(people.records('relations'),[])
+        source=meeting.path_for(vault_index.get(self.source).path);source.write_text(source.read_text().replace('ia_indexar: true','ia_indexar: false'));vault_index.rebuild_file(source)
+        with self.assertRaises(Exception) as exc:human.refresh_links(item,command,ai=True)
+        self.assertEqual(exc.exception.status_code,404)
+
+    def test_meeting_documentary_overlay_and_three_changed_targets_can_be_reproposed(self):
+        from app.core.meeting_review import record_path
+        source=meeting.create_meeting(self.project,MeetingCreate(request_id=uuid4(),title='Reunión ejemplo',fecha='2026-11-05',source='Fixture',content='Texto íntegro. Organización Demo.'))
+        mid=source['id'];targets=[self.project,self.person,self.source]
+        cmd=LinkCommand(request_id=uuid4(),source_id=mid,revision=people.revision(vault_index.get(mid)),links=[dict(target_id=t,target_revision=people.revision(vault_index.get(t)),relation='relacionado con',evidence=dict(field='relation',source_id=mid,quote='Organización Demo.')) for t in targets])
+        item=people.propose_links(cmd,'personal',True)['id'];original=meeting.path_for(source['path']).read_bytes()
+        record=dict(source_id=mid,source_sha256=hashlib.sha256(original).hexdigest(),review_kind='documental',reviewed=True,approved_by='Propietario Demo',approved_date='2026-11-11',meeting_date='2026-11-05',participants=['Persona A','Persona B'],speaker_assignment='unassigned',financial_facts_validated=False)
+        p=record_path(self.root,mid);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(record));vault_index.rebuild_file(meeting.path_for(source['path']))
+        for t in targets:
+            path=meeting.path_for(vault_index.get(t).path);path.write_text(path.read_text()+'\nCambio documental.');vault_index.rebuild_file(path)
+        d=self.detail('links',item);self.assertFalse(d['validation']['ok']);self.assertTrue(d['refresh']['source_changed']);self.assertEqual(len(d['refresh']['changed_targets']),3)
+        r,_=self.refresh(item,d);self.assertEqual(r.status_code,200,r.text)
+        fresh=self.detail('links',r.json()['id']);self.assertTrue(fresh['validation']['ok']);self.assertEqual(len(fresh['links']),3)
+        self.assertEqual(meeting.path_for(source['path']).read_bytes(),original);self.assertEqual(people.records('relations'),[])
+        self.assertTrue(vault_index.get(mid).metadata.revision_documental)
+    def test_refresh_recovers_interrupted_pair_without_extra_drafts(self):
+        from unittest.mock import patch
+        item=self.stale_with_evidence();d=self.detail('links',item)
+        command=human.RefreshLinks(request_id=uuid4(),revision=d['revision'],current_revision=d['refresh']['revision'])
+        save=people.save
+        def interrupted(bucket,key,value):
+            if bucket=='changes' and key==item:raise OSError('Synthetic interruption')
+            return save(bucket,key,value)
+        with patch.object(people,'save',side_effect=interrupted):
+            with self.assertRaises(OSError):human.refresh_links(item,command)
+        self.assertEqual(len(people.records('changes')),2);self.assertEqual(people.load('changes',item)['state'],'pending')
+        result=human.refresh_links(item,command);self.assertTrue(result['verified'])
+        self.assertEqual(len(people.records('changes')),2);self.assertEqual(self.c.get('/human/queue?kind=links').json()['total'],1)
+        self.assertEqual(people.records('relations'),[])

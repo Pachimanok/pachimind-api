@@ -9,9 +9,16 @@ from typing import Literal
 from app.core import people, meeting_capture as capture
 from app.core.vault_index import vault_index
 from app.core.human_note_review import review_path
-from app.models.people import ReviewCommand
+from app.models.people import ReviewCommand, LinkCommand
 
 Kind = Literal['links', 'person', 'meeting', 'note']
+
+
+class RefreshLinks(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    revision: str = Field(pattern=r'^[a-f0-9]{64}$')
+    current_revision: str = Field(pattern=r'^[a-f0-9]{64}$')
 
 
 class Decision(BaseModel):
@@ -52,7 +59,9 @@ def load(kind, item_id):
         if value.get('kind') != kind or not people.proposal_visible(value, 'personal', False):
             raise HTTPException(404, 'Propuesta no disponible para esta cuenta')
         n = people.node(value['target_id'], 'personal')
-        if not visible(n):raise HTTPException(404, 'Fuente no disponible')
+        if not visible(n) or not all(visible(vault_index.get(i)) for i in
+                [*[e['source_id'] for e in value.get('evidence', [])], *[l['target_id'] for l in value.get('links', [])]]):
+            raise HTTPException(404, 'Fuente o destino no disponible')
         return n, value
     n = people.node(item_id, 'personal')
     if not visible(n):raise HTTPException(404, 'Nota no disponible')
@@ -114,11 +123,11 @@ def queue(kind='all', q='', page=1, per_page=20):
         elif pending_note(candidate):items.append(row('note', candidate, None))
     counts = Counter(item['kind'] for item in items)
     counts = {k: counts[k] for k in ['links', 'person', 'meeting', 'note']}
-    selected = [i for i in items if (kind == 'all' or i['kind'] == kind) and
+    selected = [i for i in items if ((kind == 'all' and i['kind'] != 'note') or i['kind'] == kind) and
                 (not q or people.canonical(q) in people.canonical(i['title'] + ' ' + i['source']['path']))]
     selected.sort(key=lambda i: (i['created_at'], i['key']), reverse=True)
     start = (page - 1) * per_page
-    return {'total': len(selected), 'total_pending': len(items), 'counts': counts, 'page': page,
+    return {'total': len(selected), 'total_pending': sum(v for k, v in counts.items() if k != 'note'), 'counts': counts, 'page': page,
             'per_page': per_page, 'results': selected[start:start + per_page]}
 
 
@@ -142,7 +151,7 @@ def validation(kind, n, value):
             return {'ok': False, 'reason': 'Esta nota permite sólo un resumen. No se puede aprobar el contenido completo desde esta vista.'}
         return {'ok': True, 'reason': 'Revisiones comprobadas. Se validarán otra vez al aprobar.'}
     except HTTPException as exc:
-        return {'ok': False, 'reason': str(exc.detail)}
+        return {'ok': False, 'reason': str(exc.detail), 'code': 'revision_conflict' if exc.status_code == 409 else 'invalid_proposal'}
 
 
 def detail(kind, item_id):
@@ -155,6 +164,8 @@ def detail(kind, item_id):
         result['questions'] = value.get('questions', [])
         result['fields'] = value.get('fields', {})
         result['links'] = [{**link, 'target': brief(vault_index.get(link['target_id']))} for link in value.get('links', [])]
+        if kind == 'links' and not result['validation']['ok']:
+            result['refresh'] = link_refresh_preview(n, value)
         result['authorized_fields'] = ['relations'] if kind == 'links' else list(value.get('fields', {}))
         result['effect'] = ('Aplicar únicamente los vínculos mostrados, sin reescribir las notas.' if kind == 'links' else
                             'Aplicar sólo los campos mostrados; conservar el cuerpo original de la ficha.')
@@ -172,6 +183,81 @@ def detail(kind, item_id):
         result['effect'] = 'Marcar la nota revisada y, si es borrador, activa. Conservar texto, ubicación y permisos.'
         result['decline_effect'] = 'Archivar en la vista, conservando íntegro el original y su historial.'
     return result
+
+
+def link_refresh_preview(n, value):
+    """Read-only snapshot: same intent, current nodes, valid literal evidence."""
+    try:
+        source_revision = people.revision(n)
+        links = []
+        changed_targets = []
+        for old in value.get('links', []):
+            target = people.node(old['target_id'], 'personal')
+            if not visible(target):raise HTTPException(404, 'Destino no disponible')
+            current = people.revision(target)
+            if current != old['target_revision']:changed_targets.append(brief(target))
+            proof = old.get('evidence')
+            links.append({**{k: old[k] for k in ('target_id', 'relation', 'action')},
+                          'target_revision': current,
+                          'evidence': {k: proof[k] for k in ('field', 'source_id', 'quote')} if proof else None})
+        command = LinkCommand(request_id=value['id'], source_id=n.id, revision=source_revision,
+                              links=links, reserved_segments=value.get('reserved_segments', []))
+        validated = people.validate_links(n, command.links, 'personal', False)
+        source_changed = source_revision != value['base_revision']
+        if not source_changed and not changed_targets:
+            # Never offer a refresh for invalid evidence or unrelated validation failures.
+            raise HTTPException(409, 'La propuesta no necesita actualizar revisiones. Revisá el motivo indicado.')
+        fingerprint = capture.digest({'proposal': version('links', n, value), 'source': source_revision,
+                                      'links': validated, 'reserved_segments': value.get('reserved_segments', [])})
+        return {'available': True, 'revision': fingerprint, 'source_changed': source_changed,
+                'changed_targets': changed_targets,
+                'reason': 'Preparar los mismos vínculos con las revisiones actuales. Todavía no se aplicará ninguno.'}
+    except HTTPException as exc:
+        return {'available': False, 'reason': str(exc.detail)}
+
+
+def refresh_links(item_id, command, ai=False):
+    """Replace a pending proposal on explicit request; never apply its links."""
+    new_id = str(command.request_id)
+    if new_id == item_id:raise HTTPException(422, 'La propuesta nueva necesita un identificador distinto.')
+    fingerprint = capture.digest({'item_id': item_id, **command.model_dump(mode='json')})
+    with capture.transaction():
+        n, old = load('links', item_id)
+        if ai and not people.proposal_visible(old, 'personal', True):
+            raise HTTPException(404, 'Propuesta no disponible para IA')
+        existing_path = capture.path_for(people.record_path('changes', new_id))
+        new = people.load('changes', new_id) if existing_path.exists() else None
+        if new:
+            if new.get('refresh_fingerprint') != fingerprint or new.get('previous_proposal_id') != item_id:
+                raise HTTPException(409, 'Este identificador pertenece a otra propuesta.')
+            if old.get('state') == 'superseded' and old.get('superseded_by') == new_id:
+                return {'id': new_id, 'kind': 'links', 'state': new['state'], 'replaces': item_id, 'verified': True}
+        if old.get('state') != 'pending' or version('links', n, old) != command.revision:
+            raise HTTPException(409, 'La propuesta cambió o ya fue resuelta. Releela antes de actualizar.')
+        preview = link_refresh_preview(n, old)
+        if not preview['available']:raise HTTPException(409, preview['reason'])
+        if preview['revision'] != command.current_revision:
+            raise HTTPException(409, 'La fuente o un destino volvió a cambiar. Comprobá las revisiones de nuevo.')
+        links = []
+        for item in old['links']:
+            proof = item.get('evidence')
+            links.append({**{k: item[k] for k in ('target_id', 'relation', 'action')},
+                          'target_revision': people.revision(people.node(item['target_id'], 'personal')),
+                          'evidence': {k: proof[k] for k in ('field', 'source_id', 'quote')} if proof else None})
+        body = LinkCommand(request_id=command.request_id, source_id=n.id, revision=people.revision(n),
+                           links=links, reserved_segments=old.get('reserved_segments', []))
+        validated = people.validate_links(n, body.links, 'personal', ai)
+        value = new or {'id': new_id, 'kind': 'links', 'target_id': n.id, 'base_revision': body.revision,
+                       'state': 'pending', 'origin': old.get('origin', 'manual'), 'created_at': people.now(),
+                       'links': validated, 'evidence': [i['evidence'] for i in validated if i['evidence']],
+                       'reserved_segments': old.get('reserved_segments', []),
+                       'fingerprint': capture.digest({'kind': 'links', 'payload': body.model_dump(mode='json')}),
+                       'previous_proposal_id': item_id, 'refresh_fingerprint': fingerprint, 'refreshed_by': 'assistant' if ai else 'owner'}
+        # Two atomic records under the shared lock. A retry completes the pair if interrupted.
+        people.save('changes', new_id, value)
+        old.update(state='superseded', superseded_by=new_id, superseded_at=people.now())
+        people.save('changes', item_id, old)
+        return {'id': new_id, 'kind': 'links', 'state': value['state'], 'replaces': item_id, 'verified': True}
 
 
 def _note_decision(n, command):

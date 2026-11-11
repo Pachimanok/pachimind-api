@@ -42,3 +42,9 @@ def decide(kind: human.Kind, item_id: str, command: human.Decision, response: Re
 def receipt(request_id: UUID, response: Response):
     response.headers['Cache-Control'] = 'no-store'
     return human.request_result(str(request_id))
+
+
+@router.post('/items/links/{item_id}/refresh', dependencies=[Depends(owner)])
+def refresh_links(item_id: str, command: human.RefreshLinks, response: Response):
+    response.headers['Cache-Control'] = 'no-store'
+    return human.refresh_links(item_id, command)
