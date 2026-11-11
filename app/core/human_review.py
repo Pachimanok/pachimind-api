@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 from app.core import people, meeting_capture as capture
 from app.core.vault_index import vault_index
+from app.core.id_utils import path_to_id
 from app.core.human_note_review import review_path
 from app.models.people import ReviewCommand, LinkCommand
 
@@ -359,7 +360,7 @@ def decide(kind, item_id, command):
         if journal_path.exists():
             previous = people.load('human_requests', str(command.request_id))
             if previous['fingerprint'] != fingerprint:raise HTTPException(409, 'Este identificador ya se usó para otra decisión.')
-            if previous.get('result'):return previous['result']
+            if previous.get('result'):return present_receipt(previous['result'])
         else:
             n, value = load(kind, item_id)
             if not is_pending(kind, n, value) or version(kind, n, value) != command.revision:
@@ -418,10 +419,58 @@ def decide(kind, item_id, command):
     with capture.transaction():
         people.save('human_requests', str(command.request_id), {'fingerprint': fingerprint, 'kind': kind, 'item_id': item_id,
                     'state': 'complete', 'result': receipt})
-    return receipt
+    return present_receipt(receipt)
+
+
+def meeting_destination(note):
+    """Resolve a real approved record and its visible project/source, never create one."""
+    try:
+        n = people.node(note.id, 'personal')
+        if not visible(n) or n.metadata.origen != 'revision_reunion' or n.metadata.tipo not in {'accion', 'decision'}:return None
+        _, post = people.raw(n); meta = post.metadata
+        request_id = str(UUID(str(meta.get('request_id'))))
+        proposal = people.node(path_to_id(capture.proposal_path(request_id)), 'personal')
+        _, proposed = people.raw(proposal); old = proposed.metadata
+        if (old.get('review') != 'approve' or old.get('origen') != 'propuesta_reunion' or
+                old.get('tipo') != n.metadata.tipo or old.get('approved_path') != n.path or
+                old.get('project_id') != meta.get('project_id') or old.get('meeting_id') != meta.get('meeting_id')):return None
+        project = people.node(meta['project_id'], 'personal'); source = people.node(meta['meeting_id'], 'personal')
+        if not all(visible(x) for x in [proposal, project, source]):return None
+        from app.core.todo import ACTIVE
+        todo = n.metadata.tipo == 'accion' and n.metadata.estado in ACTIVE and not n.metadata.fuente_inmutable
+        return {**brief(n), 'view': 'todo' if todo else 'note', 'estado': n.metadata.estado,
+                'project': brief(project), 'source': brief(source), 'proposal_id': proposal.id,
+                'approved_at': str(old.get('reviewed_at') or ''),
+                'responsable': str(meta['responsable']) if meta.get('responsable') else None,
+                'vencimiento': str(meta['vencimiento']) if meta.get('vencimiento') else None}
+    except (HTTPException, ValueError, TypeError, KeyError):return None
+
+
+def present_receipt(receipt):
+    if receipt.get('kind') != 'meeting' or receipt.get('state') != 'approved':return receipt
+    result = dict(receipt.get('result') or {})
+    path = result.get('approved_path')
+    note = vault_index.get(path_to_id(path)) if isinstance(path, str) else None
+    destination = meeting_destination(note) if note else None
+    if not destination:result.pop('approved_path', None)
+    return {**receipt, 'result': result, 'destination': destination}
+
+
+def meeting_results(kind='all', q='', page=1, per_page=20):
+    results = []
+    for n in vault_index.all():
+        if n.metadata.origen != 'revision_reunion' or n.metadata.tipo not in {'accion', 'decision'}:continue
+        if kind != 'all' and n.metadata.tipo != kind:continue
+        destination = meeting_destination(n)
+        if not destination:continue
+        if q and people.canonical(q) not in people.canonical(destination['title'] + ' ' + destination['project']['title']):continue
+        results.append(destination)
+    results.sort(key=lambda n: (n['approved_at'], n['id']), reverse=True)
+    start = (page - 1) * per_page
+    return {'total': len(results), 'page': page, 'per_page': per_page, 'results': results[start:start + per_page]}
 
 
 def request_result(request_id):
     value = people.load('human_requests', request_id)
     load(value['kind'], value['item_id'])  # Recheck the caller's visibility before returning a receipt.
-    return value.get('result') or {'request_id': request_id, 'state': 'prepared', 'verified': False}
+    return present_receipt(value['result']) if value.get('result') else {'request_id': request_id, 'state': 'prepared', 'verified': False}

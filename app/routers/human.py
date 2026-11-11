@@ -54,3 +54,11 @@ def refresh_links(item_id: str, command: human.RefreshLinks, response: Response)
 def optional_visibility(command: human.OptionalVisibility, response: Response):
     response.headers['Cache-Control'] = 'no-store'
     return human.optional_visibility(command)
+
+
+@router.get('/meeting-results', dependencies=[Depends(owner)])
+def meeting_results(response: Response, kind: Literal['all', 'accion', 'decision'] = 'all',
+                    q: str = Query('', max_length=200), page: int = Query(1, ge=1),
+                    per_page: int = Query(20, ge=1, le=100)):
+    response.headers['Cache-Control'] = 'no-store'
+    return human.meeting_results(kind, q, page, per_page)

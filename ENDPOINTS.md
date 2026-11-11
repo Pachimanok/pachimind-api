@@ -1275,3 +1275,13 @@ No revisa, aprueba, archiva ni edita notas. Un sidecar de preferencias y recibos
 se escribe atómicamente; los reintentos conservan request_id. Un cambio de la lista
 produce 409. El GET acepta hidden=true para ver los avisos ocultos; optional incluye
 conteos y selection_revision. Al cambiar la versión de una nota, su aviso reaparece.
+
+## GET /human/meeting-results
+
+Scope personal y actor manual. Lista paginada de acciones/decisiones de reuniones
+ya aprobadas: kind=all/accion/decision, q por título/proyecto, page y per_page.
+Sólo lectura, sin cuerpos. Exige un registro de aprobación real y visibilidad del
+resultado, la propuesta, la reunión y el proyecto. Devuelve destino canónico, estado
+actual, proyecto y fuente. Los recibos de aprobación humana incluyen destination
+para abrir TODO/decisión/proyecto/reunión; se calcula también para recibos previos
+sin modificar los datos guardados. Un destino oculto no se divulga ni crea otro.

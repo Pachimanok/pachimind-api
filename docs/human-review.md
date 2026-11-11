@@ -111,3 +111,24 @@ Entrega de human_review.py, routers/human.py y assets web index/human.js/css y
 server.cjs; reinicia API/Node sin cambios MCP/OAuth. La reversión conserva el
 sidecar: el código previo vuelve a mostrar avisos porque ignora la preferencia,
 pero no altera contenidos/estados/permisos. Nunca restaurar el vault completo.
+
+## Dónde quedan las acciones y decisiones aprobadas
+
+Aprobar una acción de reunión ya crea una nota de acción pendiente que aparece en
+TODO. Aprobar una decisión ya crea un registro vinculado al proyecto/reunión, que
+aparece en Memoria > proyecto > Decisiones registradas. No se duplica ese guardado.
+
+Los recibos ahora permiten Ver en TODO, Ver decisión, Ver proyecto y Ver reunión.
+TODO abre con la actividad enfocada y sin filtros que puedan esconderla; seguir el
+acceso no la completa ni cambia fechas/responsables. Las decisiones se abren como
+notas y no generan actividades. Ver proyecto abre su memoria para consultar contexto.
+
+Ver acciones y decisiones aprobadas conserva una lista consultable tras recargar,
+con filtros por tipo, título/proyecto y paginación. Enlace directo:
+/?view=humano&human=aprobadas. Incluye aprobaciones del circuito existente, también
+las anteriores a esta entrega. Excluye pendientes/descartadas y comprueba la fuente,
+proyecto y registro de aprobación reales; se preservan permisos e inmutabilidad.
+
+La lista y todos sus accesos son sólo lectura. No extraen sugerencias ni aprueban en
+lote. Un recibo con respuesta perdida recupera el mismo resultado/destino existente.
+La publicación no ejecuta aprobaciones reales ni migra/reescribe notas antiguas.

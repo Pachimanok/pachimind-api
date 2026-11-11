@@ -334,3 +334,52 @@ class HumanReviewTests(unittest.TestCase):
         path=meeting.path_for(vault_index.get(item).path);path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
         response=self.c.get('/human/queue?kind=note&hidden=true')
         self.assertNotIn('NO MOSTRAR',response.text);self.assertNotIn(item,response.text);self.assertEqual(response.json()['total'],0)
+
+    def approved_fixture(self,kind='accion'):
+        m=meeting.create_meeting(self.project,MeetingCreate(request_id=uuid4(),title='Reunión de destino',fecha='2026-11-11',source='Fixture',content='Preparar informe. Registrar acuerdo.'))
+        p=meeting.create_proposals(self.project,m['id'],ProposalBatch(items=[ProposalCreate(request_id=uuid4(),tipo=kind,title='Resultado demo '+kind,detalle='Resultado para verificar',evidencia='Preparar informe.' if kind=='accion' else 'Registrar acuerdo.')]))[0]
+        response,body=self.decision('meeting',p['id']);self.assertEqual(response.status_code,200,response.text)
+        return m,p,response.json(),body
+    def test_approved_action_receipt_links_to_real_pending_todo_and_original(self):
+        from app.core.todo import list_tasks
+        m,p,receipt,body=self.approved_fixture()
+        d=receipt['destination'];self.assertEqual(d['view'],'todo');self.assertEqual(d['tipo'],'accion')
+        self.assertEqual(d['project']['id'],self.project);self.assertEqual(d['source']['id'],m['id'])
+        task=next(t for t in list_tasks() if t['id']==d['id']);self.assertEqual(task['estado'],'pendiente')
+        self.assertIsNone(task['responsable']);self.assertIsNone(task['vencimiento'])
+        self.assertEqual(self.c.get('/human/meeting-results').json()['results'][0]['id'],d['id'])
+        replay=self.c.post('/human/items/meeting/'+p['id']+'/decision',json=body)
+        self.assertEqual(replay.json()['destination']['id'],d['id']);self.assertEqual(len(list_tasks()),1)
+    def test_approved_decision_links_to_project_memory_but_never_to_todo(self):
+        from app.core.todo import list_tasks
+        from app.core.project_memory import build_memory
+        m,p,receipt,body=self.approved_fixture('decision');d=receipt['destination']
+        self.assertEqual(d['view'],'note');self.assertEqual(d['tipo'],'decision');self.assertEqual(list_tasks(),[])
+        memory=build_memory(vault_index.get(self.project),vault_index.all(),'personal')
+        self.assertTrue(any(n.id==d['id'] and n.tipo=='decision' for n in memory.sources))
+        self.assertEqual(self.c.get('/human/meeting-results?kind=accion').json()['total'],0)
+        self.assertEqual(self.c.get('/human/meeting-results?kind=decision&q=Proyecto+Demo').json()['total'],1)
+        receipt_read=self.c.get('/human/requests/'+body['request_id']).json();self.assertEqual(receipt_read['destination']['id'],d['id'])
+    def test_approved_catalog_read_does_not_approve_pending_or_discarded_proposals(self):
+        m=meeting.create_meeting(self.project,MeetingCreate(request_id=uuid4(),title='Reunión sin aprobar',fecha='2026-11-11',source='Fixture',content='Preparar informe.'))
+        p=meeting.create_proposals(self.project,m['id'],ProposalBatch(items=[ProposalCreate(request_id=uuid4(),tipo='accion',title='Pendiente',detalle='Preparar informe',evidencia='Preparar informe.')]))[0]
+        before={f:f.read_bytes() for f in self.root.rglob('*.md')}
+        for _ in range(2):self.assertEqual(self.c.get('/human/meeting-results').json()['total'],0)
+        self.assertEqual(before,{f:f.read_bytes() for f in self.root.rglob('*.md')})
+        self.decision('meeting',p['id'],'decline')
+        self.assertEqual(self.c.get('/human/meeting-results').json()['total'],0)
+        self.assertEqual(list(self.root.glob('09 Acciones/Capturas/*.md')),[])
+    def test_approved_catalog_preserves_owner_and_source_visibility(self):
+        m,p,receipt,body=self.approved_fixture('decision');d=receipt['destination']
+        for scope in ['ai_context','public']:
+            self.scope=scope;self.assertEqual(self.c.get('/human/meeting-results').status_code,403)
+        self.scope='personal';self.assertEqual(self.c.get('/human/meeting-results',headers={'X-PachiMind-Actor':'assistant'}).status_code,403)
+        path=meeting.path_for(vault_index.get(m['id']).path);path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
+        response=self.c.get('/human/meeting-results');self.assertEqual(response.json()['total'],0);self.assertNotIn(d['id'],response.text)
+    def test_hidden_destination_is_removed_from_receipt_without_repeating_approval(self):
+        m,p,receipt,body=self.approved_fixture();d=receipt['destination']
+        path=meeting.path_for(d['path']);path.write_text(path.read_text().replace('sensibilidad: normal','sensibilidad: secreto'));vault_index.rebuild_file(path)
+        replay=self.c.get('/human/requests/'+body['request_id']);self.assertEqual(replay.status_code,200)
+        self.assertIsNone(replay.json()['destination']);self.assertNotIn('approved_path',replay.json()['result'])
+        self.assertEqual(self.c.get('/human/meeting-results').json()['total'],0)
+        self.assertEqual(len(list(self.root.glob('09 Acciones/Capturas/*.md'))),1)
