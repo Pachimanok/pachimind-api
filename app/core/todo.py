@@ -1,7 +1,7 @@
 """User-managed activities stored as ordinary Markdown action notes."""
 from datetime import date, datetime, timezone
 from hashlib import sha256
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 import re
 import frontmatter
@@ -17,6 +17,7 @@ State=Literal['pendiente','en_proceso','completado']
 Priority=Literal['alta','media','baja']
 Area=Literal['Laboral','Personal','Familia','Amigos','Apostolado']
 ACTIVE={'pendiente','en_proceso','completado','activo','inbox'}
+Assignee=Annotated[str,Field(min_length=1,max_length=200)]
 
 class CreateTask(BaseModel):
     model_config=ConfigDict(str_strip_whitespace=True, extra='forbid')
@@ -26,6 +27,8 @@ class CreateTask(BaseModel):
     area: Area='Laboral'
     project_id: str | None=None
     responsable: str | None=Field(default=None,max_length=200)
+    subresponsables: list[Assignee]=Field(default_factory=list,max_length=20)
+    fecha_inicio: date | None=None
     vencimiento: date | None=None
     prioridad: Priority='media'
     source_decision_id: str | None=Field(default=None,min_length=1,max_length=300)
@@ -34,6 +37,8 @@ class CreateTask(BaseModel):
     def decision_pair(self):
         if bool(self.source_decision_id) != bool(self.source_decision_revision):
             raise ValueError('La decisión y su revisión deben indicarse juntas')
+        if self.fecha_inicio and self.vencimiento and self.fecha_inicio>self.vencimiento:
+            raise ValueError('La fecha de inicio no puede ser posterior al vencimiento')
         return self
 
 class UpdateTask(BaseModel):
@@ -41,6 +46,8 @@ class UpdateTask(BaseModel):
     revision: str
     estado: State | None=None
     responsable: str | None=Field(default=None,max_length=200)
+    subresponsables: list[Assignee]=Field(default_factory=list,max_length=20)
+    fecha_inicio: date | None=None
     vencimiento: date | None=None
     prioridad: Priority | None=None
 
@@ -53,8 +60,13 @@ def task_note(note_id):
 
 def read_task(n):
     data=path_for(n.path).read_bytes();post=frontmatter.loads(data.decode());m=post.metadata
+    secondary=m.get('subresponsables') or []
+    if isinstance(secondary,str):secondary=[secondary]
+    if not isinstance(secondary,list):secondary=[]
     result={'id':n.id,'path':n.path,'title':n.title,'estado':m.get('estado') if m.get('estado') in ACTIVE-{'activo','inbox'} else 'pendiente',
             'area':m.get('area'),'proyectos':n.metadata.proyectos,'responsable':str(m['responsable']) if m.get('responsable') else None,
+            'subresponsables':[s for s in secondary if isinstance(s,str) and s.strip()],
+            'fecha_inicio':str(m['fecha_inicio']) if m.get('fecha_inicio') else None,
             'vencimiento':str(m['vencimiento']) if m.get('vencimiento') else None,'prioridad':m.get('prioridad') or 'media',
             'fuente_ref':m.get('fuente_ref'),'revision':sha256(data).hexdigest()}
     if m.get('source_decision_id'):
@@ -75,6 +87,9 @@ def create_task(body, ai=False):
         payload=body.model_dump(mode='json')
         if not body.source_decision_id:
             payload.pop('source_decision_id',None);payload.pop('source_decision_revision',None)
+        # Keep the exact fingerprint of requests made before these optional fields existed.
+        if not body.subresponsables:payload.pop('subresponsables',None)
+        if body.fecha_inicio is None:payload.pop('fecha_inicio',None)
         fingerprint=digest(payload)
         folder=path_for('09 Acciones/TODO');existing=list(folder.glob(f'*{body.request_id}.md')) if folder.exists() else []
         relative=str(existing[0].relative_to(path_for('.'))) if existing else f'09 Acciones/TODO/{readable_slug(body.title)}-{body.request_id}.md'
@@ -106,6 +121,7 @@ def create_task(body, ai=False):
         meta={'titulo':body.title,'tipo':'accion','estado':'pendiente','area':project.metadata.area if project else body.area,
               'proyectos':[f'[[{project.path.removesuffix(".md")}]]'] if project else [],'project_id':project_id,
               'responsable':body.responsable,'vencimiento':body.vencimiento.isoformat() if body.vencimiento else None,
+              'subresponsables':body.subresponsables,'fecha_inicio':body.fecha_inicio.isoformat() if body.fecha_inicio else None,
               'prioridad':body.prioridad,'fecha':date.today().isoformat(),'origen':'todo_manual','revisado':True,'ia_editar':False,
               'sensibilidad':sensitivity,'ia_permiso':'allow' if allowed else 'deny',
               'ia_indexar':allowed,'request_hash':fingerprint}
@@ -126,6 +142,12 @@ def update_task(note_id,body):
         meta=frontmatter.loads(text).metadata
         changes=body.model_dump(mode='json',exclude_unset=True);changes.pop('revision')
         if any(changes.get(k,'not-null') is None for k in ['estado','prioridad']):raise HTTPException(422,'Estado y prioridad no pueden quedar vacíos')
+        if {'fecha_inicio','vencimiento'} & changes.keys():
+            start=changes.get('fecha_inicio',meta.get('fecha_inicio'));end=changes.get('vencimiento',meta.get('vencimiento'))
+            if start and end:
+                try:invalid=date.fromisoformat(str(start))>date.fromisoformat(str(end))
+                except ValueError:raise HTTPException(422,'Revisá las fechas de inicio y vencimiento')
+                if invalid:raise HTTPException(422,'La fecha de inicio no puede ser posterior al vencimiento')
         meta.update(changes)
         if 'estado' in changes:meta['completada_en']=datetime.now(timezone.utc).isoformat() if changes['estado']=='completado' else None
         # Only frontmatter changes; preserve the original body byte-for-byte.

@@ -84,3 +84,38 @@ class TodoTests(unittest.TestCase):
   p=self.root/'09 Acciones/TODO/enviar-informe-11111111-1111-4111-8111-111111111111.md';p.parent.mkdir(parents=True)
   p.write_text('---\ntitulo: Enviar informe\ntipo: accion\nestado: pendiente\nrequest_hash: 28e805cace4146052cbb0ccacd808664d9160c3d8e2c3f00b6e4269c05e875b0\n---\n\nContenido original\nsegunda línea')
   vault_index.rebuild_file(p);before=p.read_bytes();self.create();self.assertEqual(p.read_bytes(),before)
+ def test_assignments_and_dates_roundtrip_edit_clear_and_preserve_body(self):
+  self.body.update(subresponsables=[' Andrés Buteler ','Genaro La Fata'],fecha_inicio='2026-10-01')
+  task=self.create();self.assertEqual(task['subresponsables'],['Andrés Buteler','Genaro La Fata']);self.assertEqual(task['fecha_inicio'],'2026-10-01')
+  self.assertEqual(self.create()['id'],task['id']);self.assertEqual(len(list(self.root.glob('09 Acciones/TODO/*.md'))),1)
+  path=self.root/task['path'];body=path.read_bytes().split(b'---\n',2)[2]
+  vault_index.build(self.root);self.assertEqual(self.c.get('/actions/todo').json()[0],task)
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],'responsable':'Sabrina','subresponsables':['Pablo'],'fecha_inicio':'2026-10-02','vencimiento':'2026-10-08'})
+  self.assertEqual(r.status_code,200,r.text);task=r.json()
+  self.assertEqual(task['responsable'],'Sabrina');self.assertEqual(task['subresponsables'],['Pablo']);self.assertEqual(task['fecha_inicio'],'2026-10-02')
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],'estado':'completado'})
+  self.assertEqual(r.status_code,200,r.text);task=r.json();self.assertEqual(task['subresponsables'],['Pablo']);self.assertEqual(task['fecha_inicio'],'2026-10-02')
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],'responsable':None,'subresponsables':[],'fecha_inicio':None,'vencimiento':None})
+  self.assertEqual(r.status_code,200,r.text);task=r.json()
+  self.assertIsNone(task['responsable']);self.assertEqual(task['subresponsables'],[]);self.assertIsNone(task['fecha_inicio']);self.assertIsNone(task['vencimiento'])
+  self.assertEqual(path.read_bytes().split(b'---\n',2)[2],body)
+ def test_assignment_and_date_validation_is_atomic_and_checks_merged_patch(self):
+  for fields in [{'fecha_inicio':'2026-10-07'},{'fecha_inicio':'2026-02-31'},{'subresponsables':[' ']},{'subresponsables':['x'*201]},{'subresponsables':['Persona']*21},{'subresponsables':None},{'subresponsables':'Pablo'}]:
+   r=self.c.post('/actions/todo',json={**self.body,**fields});self.assertEqual(r.status_code,422,r.text)
+  self.assertEqual(list(self.root.glob('09 Acciones/TODO/*.md')),[])
+  self.body.update(fecha_inicio='2026-10-01',subresponsables=['Andrés']);task=self.create();path=self.root/task['path'];before=path.read_bytes()
+  for changes in [{'vencimiento':'2026-09-30'},{'fecha_inicio':'2026-10-07'},{'subresponsables':[' '*4]}]:
+   r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],**changes});self.assertEqual(r.status_code,422,r.text);self.assertEqual(path.read_bytes(),before)
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':'stale','subresponsables':['Otra persona']});self.assertEqual(r.status_code,409);self.assertEqual(path.read_bytes(),before)
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],'fecha_inicio':'2026-10-06'})
+  self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['fecha_inicio'],r.json()['vencimiento'])
+ def test_old_notes_have_optional_assignment_defaults_without_migration(self):
+  path=self.root/'09 Acciones/historica.md';path.parent.mkdir(parents=True);path.write_text('---\ntitulo: Histórica\ntipo: accion\nestado: pendiente\n---\n\nOriginal')
+  before=path.read_bytes();vault_index.build(self.root);task=self.c.get('/actions/todo').json()[0]
+  self.assertIsNone(task['responsable']);self.assertEqual(task['subresponsables'],[]);self.assertIsNone(task['fecha_inicio']);self.assertIsNone(task['vencimiento']);self.assertEqual(path.read_bytes(),before)
+ def test_assignment_changes_keep_decision_source_and_idempotency(self):
+  note,_=self.decision();original=(self.root/note.path).read_bytes();self.body.update(responsable='Pablo',subresponsables=['Andrés'],fecha_inicio='2026-11-12',vencimiento='2026-11-15')
+  task=self.create();self.assertEqual(self.create()['id'],task['id']);self.assertEqual(task['source_decision_id'],note.id)
+  changed={**self.body,'subresponsables':['Genaro']};self.assertEqual(self.c.post('/actions/todo',json=changed).status_code,409)
+  r=self.c.patch('/actions/todo/'+task['id'],json={'revision':task['revision'],'subresponsables':['Genaro'],'fecha_inicio':'2026-11-13'})
+  self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['source_decision_id'],note.id);self.assertEqual(r.json()['proyectos'],task['proyectos']);self.assertEqual((self.root/note.path).read_bytes(),original)
