@@ -64,6 +64,8 @@ class NoteResponse(BaseModel):
     excerpt: str | None = None
     resolved_links: dict[str, str | None] = {}
     revision: str | None = None
+    mcp_access: dict | None = None
+    inbox_classification: dict | None = None
 
 
 class NoteSummary(BaseModel):

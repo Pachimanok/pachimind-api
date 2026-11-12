@@ -12,6 +12,15 @@ def owner(scope: str = Depends(get_scope), actor: Literal['manual', 'assistant']
     if scope != 'personal' or actor != 'manual':raise HTTPException(403, 'Esta revisión requiere la sesión humana del propietario')
 
 
+from app.core.inbox_classification import Decision as ClassificationDecision
+
+@router.post('/inbox-classification/{note_id}/decision', dependencies=[Depends(owner)])
+def decide_classification(note_id: str, body: ClassificationDecision, response: Response):
+    from app.core.inbox_classification import decide
+    response.headers['Cache-Control'] = 'no-store'
+    return decide(note_id, body)
+
+
 @router.get('/summary', dependencies=[Depends(owner)])
 def summary(response: Response):
     response.headers['Cache-Control'] = 'no-store'

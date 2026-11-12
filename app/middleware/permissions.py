@@ -42,8 +42,9 @@ def is_visible(note: NoteModel, scope: str, _seen=None) -> bool:
         return False
     if rules.get("require_ia_indexar") and not note.metadata.ia_indexar:
         return False
-    if (scope != 'personal' and note.metadata.acceso_inbox_ia and
-            note.metadata.acceso_inbox_ia.get('decision') == 'allow' and note.metadata.fuentes_ids):
+    if (scope != 'personal' and note.metadata.fuentes_ids and
+            (note.metadata.origen == 'clasificacion_inbox_confirmada' or
+             note.metadata.acceso_inbox_ia and note.metadata.acceso_inbox_ia.get('decision') == 'allow')):
         from app.core.vault_index import vault_index
         seen = set(_seen or ())
         if note.id in seen:

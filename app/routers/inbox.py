@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, Response
+from typing import Literal
 from pydantic import BaseModel
 
 from app.core.inbox_writer import write_draft
@@ -9,6 +10,24 @@ from app.models.filters import NoteFilters
 from app.models.note import NoteResponse
 
 router = APIRouter(prefix="/inbox", tags=["inbox"])
+
+from app.core import inbox_classification as classification
+
+
+@router.get('/{note_id}/classification')
+def get_classification(note_id: str, response: Response, scope: str = Depends(get_scope),
+                       actor: Literal['manual', 'assistant'] = Header('manual', alias='X-PachiMind-Actor')):
+    response.headers['Cache-Control'] = 'no-store'
+    return classification.get(note_id, scope, actor == 'assistant' or scope != 'personal')
+
+
+@router.post('/{note_id}/classification')
+def propose_classification(note_id: str, body: classification.Propose, response: Response,
+                           scope: str = Depends(get_scope),
+                           actor: Literal['manual', 'assistant'] = Header('manual', alias='X-PachiMind-Actor')):
+    if scope != 'personal': raise HTTPException(403, 'Scope insuficiente para proponer clasificación')
+    response.headers['Cache-Control'] = 'no-store'
+    return classification.propose(note_id, body, scope, actor == 'assistant')
 
 
 class DraftRequest(BaseModel):

@@ -16,6 +16,13 @@ from app.models.note import NoteResponse, NoteMetadata
 router = APIRouter(prefix="/notes", tags=["notas"])
 
 
+def inbox_status(note):
+    from app.core.inbox_classification import summary
+    return {'mcp_access': {'available': is_ai_eligible(note), 'editable_original': note.metadata.ia_editar,
+                           'source_immutable': note.metadata.fuente_inmutable},
+            'inbox_classification': summary(note)}
+
+
 @router.get("", response_model=PaginatedNotes)
 def list_notes(
     area: str | None = None,
@@ -54,6 +61,7 @@ def list_notes(
             path=n.path,
             metadata=n.metadata,
             excerpt=n.content_text[:200] if n.content_text else None,
+            **inbox_status(n),
         )
         for n in page_notes
     ]
@@ -155,6 +163,7 @@ def get_note(note_id: str, scope: str = Depends(get_scope),
         excerpt=excerpt,
         resolved_links=resolved,
         revision=revision(note),
+        **inbox_status(note),
     )
 
 
