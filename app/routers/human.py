@@ -62,3 +62,17 @@ def meeting_results(response: Response, kind: Literal['all', 'accion', 'decision
                     per_page: int = Query(20, ge=1, le=100)):
     response.headers['Cache-Control'] = 'no-store'
     return human.meeting_results(kind, q, page, per_page)
+
+
+# Consent is available only through the owner's authenticated human session.
+from app.core import inbox_access
+
+@router.get('/inbox-access/{note_id}', dependencies=[Depends(owner)])
+def inbox_access_preview(note_id: str, response: Response):
+    response.headers['Cache-Control']='no-store'
+    return inbox_access.preview(note_id)
+
+@router.post('/inbox-access/{note_id}', dependencies=[Depends(owner)])
+def inbox_access_change(note_id: str, command: inbox_access.AccessCommand, response: Response):
+    response.headers['Cache-Control']='no-store'
+    return inbox_access.change(note_id,command)

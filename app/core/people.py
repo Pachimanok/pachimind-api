@@ -181,6 +181,8 @@ def revision(n):
     state = {'file': sha256(data).hexdigest(), 'relations': overlay}
     if n.metadata.revision_documental:
         state['documentary_review'] = n.metadata.revision_documental
+    if n.metadata.acceso_inbox_ia:
+        state['inbox_access'] = n.metadata.acceso_inbox_ia
     return digest(state)
 
 

@@ -51,6 +51,8 @@ def parse_note(file_path: Path, vault_root: Path) -> NoteModel | None:
         raw_meta = apply_documentary_review(raw_meta, vault_root, path_to_id(relative_path), raw)
         from app.core.human_note_review import apply_human_review
         raw_meta = apply_human_review(raw_meta, vault_root, path_to_id(relative_path), raw)
+        from app.core.inbox_access_review import apply_inbox_access
+        raw_meta = apply_inbox_access(raw_meta, vault_root, path_to_id(relative_path), raw)
         metadata = NoteMetadata.model_validate(raw_meta)
 
         title = (str(raw_meta.get("titulo")) if raw_meta.get("titulo") else extract_title(content, file_path.name))
